@@ -29,8 +29,8 @@ pub(super) fn diagnostics(world: &World) -> saddle_world_weather::WeatherDiagnos
 }
 
 pub(super) fn camera_state(world: &mut World) -> saddle_world_weather::WeatherCameraState {
-    let mut query =
-        world.query_filtered::<&saddle_world_weather::WeatherCameraState, With<PrimaryShowcaseCamera>>();
+    let mut query = world
+        .query_filtered::<&saddle_world_weather::WeatherCameraState, With<PrimaryShowcaseCamera>>();
     query
         .iter(world)
         .next()
