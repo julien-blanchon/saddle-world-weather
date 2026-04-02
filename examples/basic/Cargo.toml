@@ -1,0 +1,13 @@
+[package]
+name = "saddle-world-weather-example-basic"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bevy = { workspace = true }
+saddle-world-weather = { workspace = true }
+saddle-world-weather-example-support = { path = "../support" }
+
+[lints]
+workspace = true
