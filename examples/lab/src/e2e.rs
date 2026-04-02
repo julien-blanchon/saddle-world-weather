@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_e2e::{E2ESet, action::Action};
+use saddle_bevy_e2e::{E2ESet, action::Action};
 
 use saddle_world_weather::WeatherSystems;
 
@@ -9,7 +9,7 @@ pub struct E2EPlugin;
 
 impl Plugin for E2EPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(bevy_e2e::E2EPlugin);
+        app.add_plugins(saddle_bevy_e2e::E2EPlugin);
         app.configure_sets(Update, E2ESet.after(WeatherSystems::Diagnostics));
 
         let args: Vec<String> = std::env::args().collect();
@@ -20,7 +20,7 @@ impl Plugin for E2EPlugin {
                 if handoff {
                     scenario.actions.push(Action::Handoff);
                 }
-                bevy_e2e::init_scenario(app, scenario);
+                saddle_bevy_e2e::init_scenario(app, scenario);
             } else {
                 error!(
                     "[e2e] Unknown scenario '{name}'. Available: {:?}",

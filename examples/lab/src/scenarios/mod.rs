@@ -1,7 +1,7 @@
 mod support;
 
 use bevy::prelude::*;
-use bevy_e2e::{action::Action, scenario::Scenario};
+use saddle_bevy_e2e::{action::Action, scenario::Scenario};
 use saddle_world_saddle_world_weather::{WeatherConfig, WeatherProfile, WeatherQuality};
 
 pub fn list_scenarios() -> Vec<&'static str> {
