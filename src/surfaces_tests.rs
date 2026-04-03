@@ -1,12 +1,8 @@
 use std::time::Duration;
 
 use bevy::{
-    asset::AssetPlugin,
-    ecs::schedule::ScheduleLabel,
-    pbr::MeshMaterial3d,
-    prelude::*,
-    time::TimeUpdateStrategy,
-    transform::TransformPlugin,
+    asset::AssetPlugin, ecs::schedule::ScheduleLabel, pbr::MeshMaterial3d, prelude::*,
+    time::TimeUpdateStrategy, transform::TransformPlugin,
 };
 
 use crate::{
@@ -108,7 +104,9 @@ fn weather_surface_accumulates_wetness_and_modulates_material() {
 #[test]
 fn state_only_screen_fx_mode_keeps_camera_state_without_overlay_entities() {
     let mut app = init_app();
-    app.world_mut().resource_mut::<WeatherConfig>().screen_fx_mode = WeatherScreenFxMode::StateOnly;
+    app.world_mut()
+        .resource_mut::<WeatherConfig>()
+        .screen_fx_mode = WeatherScreenFxMode::StateOnly;
 
     let camera = app
         .world_mut()

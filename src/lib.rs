@@ -8,8 +8,8 @@ mod systems;
 mod visuals;
 
 pub use components::{
-    WeatherCamera, WeatherCameraState, WeatherOcclusionVolume, WeatherSurface,
-    WeatherSurfaceState, WeatherVolumeShape, WeatherZone,
+    WeatherCamera, WeatherCameraState, WeatherOcclusionVolume, WeatherSurface, WeatherSurfaceState,
+    WeatherVolumeShape, WeatherZone,
 };
 pub use messages::{
     LightningFlashEmitted, WeatherProfileChanged, WeatherTransitionFinished,
@@ -21,8 +21,7 @@ pub use profiles::{
 };
 pub use resources::{
     PrecipitationState, StormState, VisibilityClass, WeatherConfig, WeatherDiagnostics,
-    WeatherFactors, WeatherRuntime, WeatherScreenFxMode, WeatherScreenState,
-    WeatherTransitionMode,
+    WeatherFactors, WeatherRuntime, WeatherScreenFxMode, WeatherScreenState, WeatherTransitionMode,
     WeatherTransitionRequest, WeatherTransitionState, WeatherVisibility, WindState,
 };
 pub use solver::{

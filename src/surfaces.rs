@@ -26,16 +26,14 @@ pub(crate) fn sync_surface_materials(
     internal: Res<crate::systems::WeatherInternalState>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     zones: Query<(&WeatherZone, &GlobalTransform)>,
-    mut surfaces: Query<
-        (
-            Entity,
-            &WeatherSurface,
-            &GlobalTransform,
-            &mut MeshMaterial3d<StandardMaterial>,
-            Option<&mut WeatherSurfaceState>,
-            Option<&WeatherSurfaceMaterialBinding>,
-        ),
-    >,
+    mut surfaces: Query<(
+        Entity,
+        &WeatherSurface,
+        &GlobalTransform,
+        &mut MeshMaterial3d<StandardMaterial>,
+        Option<&mut WeatherSurfaceState>,
+        Option<&WeatherSurfaceMaterialBinding>,
+    )>,
 ) {
     let dt = time.delta_secs();
 
@@ -54,10 +52,8 @@ pub(crate) fn sync_surface_materials(
             continue;
         };
 
-        let contributions = crate::systems::collect_zone_contributions(
-            transform.translation(),
-            &zones,
-        );
+        let contributions =
+            crate::systems::collect_zone_contributions(transform.translation(), &zones);
         let zone_result = resolve_zone_profile(&runtime.active_profile, &contributions);
         let (_, precipitation, _, _, _, factors) = resolve_runtime(
             &zone_result.profile,
@@ -76,8 +72,8 @@ pub(crate) fn sync_surface_materials(
 
         let wetness_target = (factors.wetness_factor * surface.wetness_response).clamp(0.0, 1.0);
         let puddle_target = puddle_target(surface, factors.rain_factor);
-        let snow_target =
-            (factors.snow_factor * surface.snow_response * surface.max_snow_coverage).clamp(0.0, 1.0);
+        let snow_target = (factors.snow_factor * surface.snow_response * surface.max_snow_coverage)
+            .clamp(0.0, 1.0);
 
         next_state.wetness = approach(
             next_state.wetness,
@@ -123,23 +119,19 @@ pub(crate) fn sync_surface_materials(
         let damp_color = scale_color(binding.base_color, darkening.clamp(0.0, 1.0));
         material.base_color = mix_color(damp_color, surface.snow_tint, snow_mix);
         let roughness = lerp(
-            lerp(
-                binding.perceptual_roughness,
-                surface.wet_roughness,
-                wet_mix,
-            ),
+            lerp(binding.perceptual_roughness, surface.wet_roughness, wet_mix),
             surface.puddle_roughness,
             puddle_mix,
         );
-        material.perceptual_roughness = lerp(roughness, surface.snow_roughness, snow_mix)
-            .clamp(0.0, 1.0);
+        material.perceptual_roughness =
+            lerp(roughness, surface.snow_roughness, snow_mix).clamp(0.0, 1.0);
         let reflectance = lerp(
             lerp(binding.reflectance, surface.wet_reflectance, wet_mix),
             surface.puddle_reflectance,
             puddle_mix,
         );
-        material.reflectance = lerp(reflectance, surface.snow_reflectance, snow_mix)
-            .clamp(0.0, 1.0);
+        material.reflectance =
+            lerp(reflectance, surface.snow_reflectance, snow_mix).clamp(0.0, 1.0);
         material.metallic = binding.metallic;
 
         if let Some(mut state) = state {
@@ -153,14 +145,12 @@ pub(crate) fn sync_surface_materials(
 pub(crate) fn reset_surface_materials(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut surfaces: Query<
-        (
-            Entity,
-            &WeatherSurfaceMaterialBinding,
-            &MeshMaterial3d<StandardMaterial>,
-            Option<&WeatherSurfaceState>,
-        ),
-    >,
+    mut surfaces: Query<(
+        Entity,
+        &WeatherSurfaceMaterialBinding,
+        &MeshMaterial3d<StandardMaterial>,
+        Option<&WeatherSurfaceState>,
+    )>,
 ) {
     for (entity, binding, material_slot, state) in &mut surfaces {
         if let Some(material) = materials.get_mut(&material_slot.0) {
@@ -170,7 +160,9 @@ pub(crate) fn reset_surface_materials(
             material.reflectance = binding.reflectance;
         }
 
-        commands.entity(entity).remove::<WeatherSurfaceMaterialBinding>();
+        commands
+            .entity(entity)
+            .remove::<WeatherSurfaceMaterialBinding>();
         if state.is_some() {
             commands.entity(entity).remove::<WeatherSurfaceState>();
         }

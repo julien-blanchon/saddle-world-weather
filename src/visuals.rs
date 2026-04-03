@@ -12,8 +12,7 @@ use bevy::{
 
 use crate::{
     PrecipitationKind, WeatherCamera, WeatherCameraState, WeatherConfig, WeatherQuality,
-    WeatherScreenFxMode,
-    profiles::WeatherQualityPlan, solver::hash01,
+    WeatherScreenFxMode, profiles::WeatherQualityPlan, solver::hash01,
 };
 
 #[derive(Resource, Default)]
