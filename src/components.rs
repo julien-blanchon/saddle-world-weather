@@ -88,6 +88,94 @@ impl Default for WeatherCameraState {
     }
 }
 
+#[derive(Component, Debug, Clone, PartialEq, Reflect)]
+#[reflect(Component)]
+pub struct WeatherSurface {
+    pub enabled: bool,
+    pub wetness_response: f32,
+    pub puddle_response: f32,
+    pub snow_response: f32,
+    pub wetting_speed: f32,
+    pub drying_speed: f32,
+    pub puddle_fill_speed: f32,
+    pub puddle_drain_speed: f32,
+    pub snow_accumulation_speed: f32,
+    pub snow_melt_speed: f32,
+    pub puddle_threshold: f32,
+    pub max_puddle_coverage: f32,
+    pub max_snow_coverage: f32,
+    pub wet_roughness: f32,
+    pub puddle_roughness: f32,
+    pub snow_roughness: f32,
+    pub wet_reflectance: f32,
+    pub puddle_reflectance: f32,
+    pub snow_reflectance: f32,
+    pub wet_darkening: f32,
+    pub puddle_darkening: f32,
+    pub snow_tint: Color,
+}
+
+impl Default for WeatherSurface {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            wetness_response: 1.0,
+            puddle_response: 0.85,
+            snow_response: 1.0,
+            wetting_speed: 0.55,
+            drying_speed: 0.08,
+            puddle_fill_speed: 0.30,
+            puddle_drain_speed: 0.06,
+            snow_accumulation_speed: 0.22,
+            snow_melt_speed: 0.10,
+            puddle_threshold: 0.35,
+            max_puddle_coverage: 0.7,
+            max_snow_coverage: 1.0,
+            wet_roughness: 0.18,
+            puddle_roughness: 0.04,
+            snow_roughness: 0.92,
+            wet_reflectance: 0.34,
+            puddle_reflectance: 0.52,
+            snow_reflectance: 0.16,
+            wet_darkening: 0.18,
+            puddle_darkening: 0.28,
+            snow_tint: Color::srgb(0.92, 0.95, 1.0),
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, PartialEq, Reflect)]
+#[reflect(Component)]
+pub struct WeatherSurfaceState {
+    pub base_profile_label: Option<String>,
+    pub resolved_profile_label: Option<String>,
+    pub zone_label: Option<String>,
+    pub precipitation_kind: PrecipitationKind,
+    pub rain_factor: f32,
+    pub snow_factor: f32,
+    pub wetness_factor: f32,
+    pub wetness: f32,
+    pub puddle_coverage: f32,
+    pub snow_coverage: f32,
+}
+
+impl Default for WeatherSurfaceState {
+    fn default() -> Self {
+        Self {
+            base_profile_label: None,
+            resolved_profile_label: None,
+            zone_label: None,
+            precipitation_kind: PrecipitationKind::None,
+            rain_factor: 0.0,
+            snow_factor: 0.0,
+            wetness_factor: 0.0,
+            wetness: 0.0,
+            puddle_coverage: 0.0,
+            snow_coverage: 0.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Reflect)]
 pub enum WeatherVolumeShape {
     Sphere { radius: f32 },

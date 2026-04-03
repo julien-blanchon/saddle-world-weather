@@ -1,6 +1,6 @@
 # Saddle World Weather
 
-Reusable Bevy weather orchestration for authored profiles, deterministic transitions, camera-local precipitation, fog sync, wind, shelter suppression, local override zones, and optional screen-space weather cues.
+Reusable Bevy weather orchestration for authored profiles, deterministic transitions, camera-local precipitation, fog sync, wind, shelter suppression, local override zones, optional screen-space weather cues, and opt-in surface wetness / puddle / snow accumulation.
 
 The crate stays shared-crate safe:
 
@@ -57,6 +57,7 @@ Attach `WeatherCamera` to any camera that should receive precipitation, fog sync
 - `WindState`
 - `PrecipitationState`
 - `WeatherVisibility`
+- `WeatherScreenFxMode`
 - `WeatherScreenState`
 - `StormState`
 - `WeatherFactors`
@@ -65,6 +66,8 @@ Attach `WeatherCamera` to any camera that should receive precipitation, fog sync
 
 - `WeatherCamera`
 - `WeatherCameraState` (base and resolved labels, local precipitation/fog/wind state)
+- `WeatherSurface`
+- `WeatherSurfaceState`
 - `WeatherZone`
 - `WeatherOcclusionVolume`
 - `WeatherVolumeShape`
@@ -81,6 +84,7 @@ Attach `WeatherCamera` to any camera that should receive precipitation, fog sync
 - `WeatherSystems::ApplyRequests`
 - `WeatherSystems::AdvanceTransition`
 - `WeatherSystems::ResolveBaseState`
+- `WeatherSystems::SyncSurfaces`
 - `WeatherSystems::ResolveCameraState`
 - `WeatherSystems::SyncEmitters`
 - `WeatherSystems::SyncFog`
@@ -105,14 +109,16 @@ Attach `WeatherCamera` to any camera that should receive precipitation, fog sync
 - Precipitation is camera-local and recycled. The crate does not attempt full-map literal particle simulation.
 - `WeatherCameraState` separates the global transitioned label from the camera-local resolved label so BRP inspection can distinguish “global clear” from “local storm pocket”.
 - Fog sync uses Bevy `DistanceFog` on opted-in cameras.
+- `WeatherSurface` opts meshes with `MeshMaterial3d<StandardMaterial>` into crate-managed wetness, puddle reflectance, and snow coverage updates. The first sync clones the material handle so weather does not mutate shared authoring assets in place.
 - Lightning is currently a deterministic screen-space flash cue plus message surface, not a sky-lightning or thunder system.
 - Quality scaling changes particle budgets and screen-effect participation without leaking backend details into the public API, and `WeatherDiagnostics` exposes the active quality tier plus message counters for runtime debugging.
+- Built-in screen overlays are now optional. Set `WeatherConfig::screen_fx_mode` to `WeatherScreenFxMode::StateOnly` when another crate owns the final post-process composition and you only want `WeatherCameraState` / `WeatherRuntime` as inputs.
 
 ## Limitations
 
 - No volumetric cloud or sky rendering. Pair this crate with a dedicated sky or day-night system if needed.
 - No GPU particle backend. The default implementation uses crate-owned CPU-managed precipitation emitters.
-- The crate emits wetness and visibility hints but does not mutate arbitrary scene materials on your behalf.
+- Surface modulation currently targets `StandardMaterial` via `MeshMaterial3d<StandardMaterial>` and does not yet provide non-PBR or custom-material adapters.
 
 ## Documentation
 

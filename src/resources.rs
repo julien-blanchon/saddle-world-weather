@@ -9,6 +9,13 @@ pub enum WeatherTransitionMode {
     Smooth,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect, Default)]
+pub enum WeatherScreenFxMode {
+    #[default]
+    BuiltInOverlay,
+    StateOnly,
+}
+
 #[derive(Debug, Clone, PartialEq, Reflect)]
 pub struct WeatherTransitionRequest {
     pub profile: WeatherProfile,
@@ -41,6 +48,7 @@ pub struct WeatherConfig {
     pub quality: WeatherQuality,
     pub seed: u64,
     pub diagnostics_enabled: bool,
+    pub screen_fx_mode: WeatherScreenFxMode,
     pub default_transition_duration_secs: f32,
     pub pending_request: Option<WeatherTransitionRequest>,
 }
@@ -52,6 +60,7 @@ impl Default for WeatherConfig {
             quality: WeatherQuality::High,
             seed: 0xC0FFEE_u64,
             diagnostics_enabled: true,
+            screen_fx_mode: WeatherScreenFxMode::BuiltInOverlay,
             default_transition_duration_secs: 4.0,
             pending_request: None,
         }

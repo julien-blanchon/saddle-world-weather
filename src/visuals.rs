@@ -12,6 +12,7 @@ use bevy::{
 
 use crate::{
     PrecipitationKind, WeatherCamera, WeatherCameraState, WeatherConfig, WeatherQuality,
+    WeatherScreenFxMode,
     profiles::WeatherQualityPlan, solver::hash01,
 };
 
@@ -208,6 +209,13 @@ pub(crate) fn sync_screen_effect_overlays(
         .iter()
         .map(|(entity, overlay)| (overlay.camera, (entity, overlay.material.clone())))
         .collect();
+
+    if matches!(config.screen_fx_mode, WeatherScreenFxMode::StateOnly) {
+        for (_, (entity, _)) in existing_overlays {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
 
     let mut desired_overlays = HashSet::new();
     for (camera_entity, weather_camera, state) in &cameras {

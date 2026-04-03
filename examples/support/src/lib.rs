@@ -1,5 +1,9 @@
 use bevy::{color::LinearRgba, prelude::*};
-use saddle_world_weather::{WeatherCamera, WeatherCameraState, WeatherDiagnostics, WeatherRuntime};
+use saddle_pane::prelude::*;
+use saddle_world_weather::{
+    WeatherCamera, WeatherCameraState, WeatherConfig, WeatherDiagnostics, WeatherProfile,
+    WeatherQuality, WeatherRuntime, WeatherScreenFxMode,
+};
 
 #[derive(Component)]
 pub struct ShowcaseSpinner {
@@ -29,6 +33,64 @@ pub struct LinearCameraRail {
     pub focus: Vec3,
     pub speed: f32,
     pub phase_offset: f32,
+}
+
+#[derive(Resource, Clone, Default, Pane)]
+#[pane(title = "Weather Controls", position = "top-right")]
+pub struct WeatherDemoPane {
+    #[pane(select(options = ["Clear", "Foggy", "Rain", "Storm", "Snow"]))]
+    pub profile_index: usize,
+    #[pane]
+    pub instant_apply: bool,
+    #[pane(slider, min = 0.1, max = 8.0, step = 0.1)]
+    pub transition_duration_secs: f32,
+    #[pane(select(options = ["Low", "Medium", "High"]))]
+    pub quality_index: usize,
+    #[pane]
+    pub built_in_overlays: bool,
+    #[pane(monitor)]
+    pub rain_factor: f32,
+    #[pane(monitor)]
+    pub wetness_factor: f32,
+    #[pane(monitor)]
+    pub visibility_distance: f32,
+}
+
+#[derive(Resource, Clone, Copy)]
+struct WeatherDemoPaneState {
+    last_profile_index: usize,
+}
+
+impl WeatherDemoPane {
+    pub fn from_config(config: &WeatherConfig) -> Self {
+        Self {
+            profile_index: profile_to_index(&config.initial_profile),
+            instant_apply: false,
+            transition_duration_secs: config.default_transition_duration_secs,
+            quality_index: quality_to_index(config.quality),
+            built_in_overlays: matches!(config.screen_fx_mode, WeatherScreenFxMode::BuiltInOverlay),
+            rain_factor: 0.0,
+            wetness_factor: 0.0,
+            visibility_distance: 0.0,
+        }
+    }
+}
+
+pub fn install_demo_pane(app: &mut App, config: &WeatherConfig) {
+    let pane = WeatherDemoPane::from_config(config);
+    app.insert_resource(WeatherDemoPaneState {
+        last_profile_index: pane.profile_index,
+    });
+    app.insert_resource(pane);
+    app.add_plugins((
+        bevy_flair::FlairPlugin,
+        bevy_input_focus::InputDispatchPlugin,
+        bevy_ui_widgets::UiWidgetsPlugins,
+        bevy_input_focus::tab_navigation::TabNavigationPlugin,
+        PanePlugin,
+    ))
+    .register_pane::<WeatherDemoPane>();
+    app.add_systems(Update, (sync_demo_pane, sync_demo_monitors));
 }
 
 pub fn spawn_weather_camera(
@@ -275,6 +337,45 @@ pub fn update_weather_overlay(
     );
 }
 
+fn sync_demo_pane(
+    pane: Res<WeatherDemoPane>,
+    mut pane_state: ResMut<WeatherDemoPaneState>,
+    mut config: ResMut<WeatherConfig>,
+) {
+    let desired_transition = pane.transition_duration_secs.max(0.05);
+    let desired_quality = index_to_quality(pane.quality_index);
+    let desired_screen_fx_mode = if pane.built_in_overlays {
+        WeatherScreenFxMode::BuiltInOverlay
+    } else {
+        WeatherScreenFxMode::StateOnly
+    };
+    if (config.default_transition_duration_secs - desired_transition).abs() > f32::EPSILON {
+        config.default_transition_duration_secs = desired_transition;
+    }
+    if config.quality != desired_quality {
+        config.quality = desired_quality;
+    }
+    if config.screen_fx_mode != desired_screen_fx_mode {
+        config.screen_fx_mode = desired_screen_fx_mode;
+    }
+
+    if pane.profile_index != pane_state.last_profile_index {
+        let profile = profile_from_index(pane.profile_index);
+        if pane.instant_apply {
+            config.queue_immediate(profile);
+        } else {
+            config.queue_transition(profile, pane.transition_duration_secs.max(0.05));
+        }
+        pane_state.last_profile_index = pane.profile_index;
+    }
+}
+
+fn sync_demo_monitors(runtime: Res<WeatherRuntime>, mut pane: ResMut<WeatherDemoPane>) {
+    pane.rain_factor = runtime.factors.rain_factor;
+    pane.wetness_factor = runtime.factors.wetness_factor;
+    pane.visibility_distance = runtime.visibility.visibility_distance;
+}
+
 fn spawn_shelter(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -310,5 +411,41 @@ fn spawn_shelter(
             })),
             Transform::from_translation(translation),
         ));
+    }
+}
+
+fn profile_to_index(profile: &WeatherProfile) -> usize {
+    match profile.label.as_deref() {
+        Some("Foggy") => 1,
+        Some("Rain") => 2,
+        Some("Storm") => 3,
+        Some("Snow") => 4,
+        _ => 0,
+    }
+}
+
+fn profile_from_index(index: usize) -> WeatherProfile {
+    match index {
+        1 => WeatherProfile::foggy(),
+        2 => WeatherProfile::rain(),
+        3 => WeatherProfile::storm(),
+        4 => WeatherProfile::snow(),
+        _ => WeatherProfile::clear(),
+    }
+}
+
+fn quality_to_index(quality: WeatherQuality) -> usize {
+    match quality {
+        WeatherQuality::Low => 0,
+        WeatherQuality::Medium => 1,
+        WeatherQuality::High => 2,
+    }
+}
+
+fn index_to_quality(index: usize) -> WeatherQuality {
+    match index {
+        0 => WeatherQuality::Low,
+        1 => WeatherQuality::Medium,
+        _ => WeatherQuality::High,
     }
 }

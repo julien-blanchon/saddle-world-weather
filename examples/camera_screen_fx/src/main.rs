@@ -13,6 +13,12 @@ struct RightCamera;
 struct SplitOverlay;
 
 fn main() {
+    let config = WeatherConfig {
+        quality: WeatherQuality::High,
+        initial_profile: WeatherProfile::storm(),
+        seed: 99,
+        ..default()
+    };
     let mut app = App::new();
     app.insert_resource(ClearColor(Color::srgb(0.56, 0.63, 0.72)));
     app.insert_resource(GlobalAmbientLight {
@@ -28,12 +34,8 @@ fn main() {
         }),
         ..default()
     }));
-    app.add_plugins(WeatherPlugin::default().with_config(WeatherConfig {
-        quality: WeatherQuality::High,
-        initial_profile: WeatherProfile::storm(),
-        seed: 99,
-        ..default()
-    }));
+    support::install_demo_pane(&mut app, &config);
+    app.add_plugins(WeatherPlugin::default().with_config(config));
     app.add_systems(Startup, setup);
     app.add_systems(Update, (support::animate_props, update_split_overlay));
     app.run();
@@ -106,8 +108,8 @@ fn setup(
 }
 
 fn update_split_overlay(
-    left: Query<&saddle_world_saddle_world_weather::WeatherCameraState, With<LeftCamera>>,
-    right: Query<&saddle_world_saddle_world_weather::WeatherCameraState, With<RightCamera>>,
+    left: Query<&saddle_world_weather::WeatherCameraState, With<LeftCamera>>,
+    right: Query<&saddle_world_weather::WeatherCameraState, With<RightCamera>>,
     mut overlay: Query<&mut Text, With<SplitOverlay>>,
 ) {
     let Ok(mut text) = overlay.single_mut() else {

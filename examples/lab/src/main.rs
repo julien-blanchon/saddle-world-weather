@@ -8,8 +8,8 @@ use bevy::prelude::*;
 use saddle_world_weather::{
     LightningFlashEmitted, WeatherCameraState, WeatherConfig, WeatherDiagnostics,
     WeatherOcclusionVolume, WeatherPlugin, WeatherProfile, WeatherProfileChanged, WeatherQuality,
-    WeatherRuntime, WeatherSystems, WeatherTransitionFinished, WeatherTransitionStarted,
-    WeatherVolumeShape, WeatherZone,
+    WeatherRuntime, WeatherScreenFxMode, WeatherSystems, WeatherTransitionFinished,
+    WeatherTransitionStarted, WeatherVolumeShape, WeatherZone,
 };
 
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
@@ -49,7 +49,9 @@ fn main() {
     app.add_plugins(bevy_brp_extras::BrpExtrasPlugin::default());
     #[cfg(feature = "e2e")]
     app.add_plugins(e2e::E2EPlugin);
-    app.add_plugins(WeatherPlugin::default().with_config(lab_config()));
+    let config = lab_config();
+    support::install_demo_pane(&mut app, &config);
+    app.add_plugins(WeatherPlugin::default().with_config(config));
     app.add_systems(Startup, setup);
     app.add_systems(
         Update,
@@ -69,6 +71,7 @@ fn lab_config() -> WeatherConfig {
         seed: 21,
         default_transition_duration_secs: 1.5,
         diagnostics_enabled: true,
+        screen_fx_mode: WeatherScreenFxMode::BuiltInOverlay,
         pending_request: None,
     }
 }

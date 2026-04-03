@@ -4,6 +4,12 @@ use bevy::prelude::*;
 use saddle_world_weather::{WeatherConfig, WeatherPlugin, WeatherProfile, WeatherQuality};
 
 fn main() {
+    let config = WeatherConfig {
+        quality: WeatherQuality::High,
+        initial_profile: windy_snow_profile(),
+        seed: 42,
+        ..default()
+    };
     let mut app = App::new();
     app.insert_resource(ClearColor(Color::srgb(0.60, 0.68, 0.78)));
     app.insert_resource(GlobalAmbientLight {
@@ -19,12 +25,8 @@ fn main() {
         }),
         ..default()
     }));
-    app.add_plugins(WeatherPlugin::default().with_config(WeatherConfig {
-        quality: WeatherQuality::High,
-        initial_profile: windy_snow_profile(),
-        seed: 42,
-        ..default()
-    }));
+    support::install_demo_pane(&mut app, &config);
+    app.add_plugins(WeatherPlugin::default().with_config(config));
     app.add_systems(Startup, setup);
     app.add_systems(
         Update,

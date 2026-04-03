@@ -3,11 +3,13 @@ mod messages;
 mod profiles;
 mod resources;
 mod solver;
+mod surfaces;
 mod systems;
 mod visuals;
 
 pub use components::{
-    WeatherCamera, WeatherCameraState, WeatherOcclusionVolume, WeatherVolumeShape, WeatherZone,
+    WeatherCamera, WeatherCameraState, WeatherOcclusionVolume, WeatherSurface,
+    WeatherSurfaceState, WeatherVolumeShape, WeatherZone,
 };
 pub use messages::{
     LightningFlashEmitted, WeatherProfileChanged, WeatherTransitionFinished,
@@ -19,7 +21,8 @@ pub use profiles::{
 };
 pub use resources::{
     PrecipitationState, StormState, VisibilityClass, WeatherConfig, WeatherDiagnostics,
-    WeatherFactors, WeatherRuntime, WeatherScreenState, WeatherTransitionMode,
+    WeatherFactors, WeatherRuntime, WeatherScreenFxMode, WeatherScreenState,
+    WeatherTransitionMode,
     WeatherTransitionRequest, WeatherTransitionState, WeatherVisibility, WindState,
 };
 pub use solver::{
@@ -38,6 +41,7 @@ pub enum WeatherSystems {
     ApplyRequests,
     AdvanceTransition,
     ResolveBaseState,
+    SyncSurfaces,
     ResolveCameraState,
     SyncEmitters,
     SyncFog,
@@ -119,7 +123,10 @@ impl Plugin for WeatherPlugin {
             .register_type::<WeatherProfile>()
             .register_type::<WeatherQuality>()
             .register_type::<WeatherRuntime>()
+            .register_type::<WeatherScreenFxMode>()
             .register_type::<WeatherScreenState>()
+            .register_type::<WeatherSurface>()
+            .register_type::<WeatherSurfaceState>()
             .register_type::<WeatherTransitionMode>()
             .register_type::<WeatherTransitionRequest>()
             .register_type::<WeatherTransitionState>()
@@ -131,7 +138,12 @@ impl Plugin for WeatherPlugin {
             .add_systems(self.activate_schedule, systems::activate_runtime)
             .add_systems(
                 self.deactivate_schedule,
-                (systems::deactivate_runtime, systems::cleanup_runtime).chain(),
+                (
+                    systems::deactivate_runtime,
+                    systems::cleanup_runtime,
+                    surfaces::reset_surface_materials,
+                )
+                    .chain(),
             )
             .configure_sets(
                 self.update_schedule,
@@ -139,6 +151,7 @@ impl Plugin for WeatherPlugin {
                     WeatherSystems::ApplyRequests,
                     WeatherSystems::AdvanceTransition,
                     WeatherSystems::ResolveBaseState,
+                    WeatherSystems::SyncSurfaces,
                     WeatherSystems::ResolveCameraState,
                     WeatherSystems::SyncEmitters,
                     WeatherSystems::SyncFog,
@@ -164,6 +177,12 @@ impl Plugin for WeatherPlugin {
                 self.update_schedule,
                 systems::resolve_base_runtime
                     .in_set(WeatherSystems::ResolveBaseState)
+                    .run_if(systems::runtime_is_active),
+            )
+            .add_systems(
+                self.update_schedule,
+                surfaces::sync_surface_materials
+                    .in_set(WeatherSystems::SyncSurfaces)
                     .run_if(systems::runtime_is_active),
             )
             .add_systems(

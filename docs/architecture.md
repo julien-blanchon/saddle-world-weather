@@ -45,11 +45,23 @@ The crate keeps the core solver mostly pure Rust:
 The Bevy integration layer lives in:
 
 - `systems.rs`: activation, transitions, runtime resolution, camera resolution, fog sync, diagnostics, message emission
+- `surfaces.rs`: opt-in `WeatherSurface` accumulation and `StandardMaterial` modulation
 - `visuals.rs`: precipitation emitter management and optional screen overlays
 
 The emitter presentation consumes `WeatherCameraState.wind_influence`, so authored precipitation wind response changes the actual visual drift instead of staying metadata-only.
 
 This split keeps the hard logic testable without a full `App`.
+
+## Surface Material Bridge
+
+`WeatherSurface` is intentionally opt-in and conservative:
+
+- it only targets entities using `MeshMaterial3d<StandardMaterial>`
+- on first sync, the crate clones the referenced material handle so the weathered copy becomes entity-local
+- weather is resolved at the surface entity's world position using the same zone/profile solver path used by cameras
+- the crate writes `WeatherSurfaceState` so downstream code can react to wetness, puddles, or snow accumulation without re-solving weather
+
+This keeps the default bridge useful for real scenes while avoiding hidden mutation of shared authoring materials.
 
 ## System Ordering
 
@@ -58,17 +70,19 @@ The public `WeatherSystems` order is fixed and chained:
 1. `ApplyRequests`
 2. `AdvanceTransition`
 3. `ResolveBaseState`
-4. `ResolveCameraState`
-5. `SyncEmitters`
-6. `SyncFog`
-7. `SyncScreenEffects`
-8. `EmitMessages`
-9. `Diagnostics`
+4. `SyncSurfaces`
+5. `ResolveCameraState`
+6. `SyncEmitters`
+7. `SyncFog`
+8. `SyncScreenEffects`
+9. `EmitMessages`
+10. `Diagnostics`
 
 Implications:
 
 - profile transition requests are consumed before the frame advances
-- global weather is resolved before any camera-local weather state
+- global weather is resolved before any surface-local or camera-local weather state
+- authored surface materials are updated before downstream gameplay or diagnostics read `WeatherSurfaceState`
 - precipitation and fog consume camera-local state, not raw authored profiles
 - messages fire after runtime resolution, so downstream readers see the resolved state in the same frame
 
@@ -119,6 +133,21 @@ This gives downstream apps a useful baseline that composes well with:
 - scene lighting
 - atmosphere systems
 - additional volumetric rendering from other crates
+
+## Screen-Effects Strategy
+
+The solver always resolves screen-space weather cues into `WeatherCameraState`:
+
+- overlay intensity and tint
+- droplets, frost, and streak strength
+- lightning flash intensity
+
+How that state is presented depends on `WeatherConfig::screen_fx_mode`:
+
+- `BuiltInOverlay`: the crate maintains lightweight overlay entities for opted-in cameras
+- `StateOnly`: overlay entities are skipped and existing overlays are cleaned up, leaving presentation to another screen-effects system
+
+This keeps weather usable both as a standalone crate and as a source of authored inputs for a broader atmosphere or post-processing stack.
 
 ## Quality Model
 

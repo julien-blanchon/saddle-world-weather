@@ -10,6 +10,12 @@ struct TransitionCycle {
 }
 
 fn main() {
+    let config = WeatherConfig {
+        quality: WeatherQuality::High,
+        initial_profile: WeatherProfile::clear(),
+        seed: 7,
+        ..default()
+    };
     let mut app = App::new();
     app.insert_resource(ClearColor(Color::srgb(0.56, 0.63, 0.72)));
     app.insert_resource(GlobalAmbientLight {
@@ -29,12 +35,8 @@ fn main() {
         }),
         ..default()
     }));
-    app.add_plugins(WeatherPlugin::default().with_config(WeatherConfig {
-        quality: WeatherQuality::High,
-        initial_profile: WeatherProfile::clear(),
-        seed: 7,
-        ..default()
-    }));
+    support::install_demo_pane(&mut app, &config);
+    app.add_plugins(WeatherPlugin::default().with_config(config));
     app.add_systems(Startup, setup);
     app.add_systems(
         Update,

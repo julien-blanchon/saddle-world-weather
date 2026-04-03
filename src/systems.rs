@@ -461,7 +461,7 @@ fn default_distance_fog(state: &WeatherCameraState) -> DistanceFog {
     }
 }
 
-fn collect_zone_contributions(
+pub(crate) fn collect_zone_contributions(
     camera_position: Vec3,
     zones: &Query<(&WeatherZone, &GlobalTransform)>,
 ) -> Vec<ZoneContribution> {
