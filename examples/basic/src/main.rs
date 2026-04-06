@@ -1,7 +1,10 @@
 use saddle_world_weather_example_support as support;
 
 use bevy::prelude::*;
-use saddle_world_weather::{WeatherConfig, WeatherPlugin, WeatherProfile, WeatherQuality};
+use saddle_world_weather::{
+    WeatherConfig, WeatherPlugin, WeatherProfile, WeatherQuality, WeatherSurfaceMaterialsPlugin,
+    WeatherVisualsConfig, WeatherVisualsPlugin,
+};
 
 #[derive(Resource)]
 struct BasicCycle {
@@ -11,8 +14,11 @@ struct BasicCycle {
 
 fn main() {
     let config = WeatherConfig {
-        quality: WeatherQuality::Medium,
         initial_profile: WeatherProfile::clear(),
+        ..default()
+    };
+    let visuals = WeatherVisualsConfig {
+        quality: WeatherQuality::Medium,
         ..default()
     };
     let mut app = App::new();
@@ -34,8 +40,12 @@ fn main() {
         }),
         ..default()
     }));
-    support::install_demo_pane(&mut app, &config);
-    app.add_plugins(WeatherPlugin::default().with_config(config));
+    support::install_demo_pane(&mut app, &config, &visuals);
+    app.add_plugins((
+        WeatherPlugin::default().with_config(config),
+        WeatherVisualsPlugin::default().with_config(visuals),
+        WeatherSurfaceMaterialsPlugin::default(),
+    ));
     app.add_systems(Startup, setup);
     app.add_systems(
         Update,

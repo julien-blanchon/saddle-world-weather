@@ -1,8 +1,9 @@
 use bevy::{color::LinearRgba, prelude::*};
 use saddle_pane::prelude::*;
 use saddle_world_weather::{
-    WeatherCamera, WeatherCameraState, WeatherConfig, WeatherDiagnostics, WeatherProfile,
-    WeatherQuality, WeatherRuntime, WeatherScreenFxMode,
+    WeatherCamera, WeatherCameraState, WeatherCameraVisualState, WeatherConfig, WeatherDiagnostics,
+    WeatherProfile, WeatherQuality, WeatherRuntime, WeatherScreenFxMode, WeatherSurface,
+    WeatherSurfaceStandardMaterial, WeatherVisualDiagnostics, WeatherVisualsConfig,
 };
 
 #[derive(Component)]
@@ -59,16 +60,19 @@ pub struct WeatherDemoPane {
 #[derive(Resource, Clone, Copy)]
 struct WeatherDemoPaneState {
     last_profile_index: usize,
+    last_transition_duration_secs: f32,
+    last_quality_index: usize,
+    last_built_in_overlays: bool,
 }
 
 impl WeatherDemoPane {
-    pub fn from_config(config: &WeatherConfig) -> Self {
+    pub fn from_configs(config: &WeatherConfig, visuals: &WeatherVisualsConfig) -> Self {
         Self {
             profile_index: profile_to_index(&config.initial_profile),
             instant_apply: false,
             transition_duration_secs: config.default_transition_duration_secs,
-            quality_index: quality_to_index(config.quality),
-            built_in_overlays: matches!(config.screen_fx_mode, WeatherScreenFxMode::BuiltInOverlay),
+            quality_index: quality_to_index(visuals.quality),
+            built_in_overlays: matches!(visuals.screen_fx_mode, WeatherScreenFxMode::BuiltInOverlay),
             rain_factor: 0.0,
             wetness_factor: 0.0,
             visibility_distance: 0.0,
@@ -76,10 +80,13 @@ impl WeatherDemoPane {
     }
 }
 
-pub fn install_demo_pane(app: &mut App, config: &WeatherConfig) {
-    let pane = WeatherDemoPane::from_config(config);
+pub fn install_demo_pane(app: &mut App, config: &WeatherConfig, visuals: &WeatherVisualsConfig) {
+    let pane = WeatherDemoPane::from_configs(config, visuals);
     app.insert_resource(WeatherDemoPaneState {
         last_profile_index: pane.profile_index,
+        last_transition_duration_secs: pane.transition_duration_secs,
+        last_quality_index: pane.quality_index,
+        last_built_in_overlays: pane.built_in_overlays,
     });
     app.insert_resource(pane);
     app.add_plugins((
@@ -126,6 +133,8 @@ pub fn spawn_showcase_environment(
 
     commands.spawn((
         Name::new("Weather Ground"),
+        WeatherSurface::default(),
+        WeatherSurfaceStandardMaterial::default(),
         Mesh3d(meshes.add(Plane3d::default().mesh().size(120.0, 120.0))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.16, 0.18, 0.20),
@@ -170,6 +179,8 @@ pub fn spawn_showcase_environment(
     for (index, (name, translation, scale, color)) in props.into_iter().enumerate() {
         commands.spawn((
             Name::new(name),
+            WeatherSurface::default(),
+            WeatherSurfaceStandardMaterial::default(),
             Mesh3d(meshes.add(Cuboid::new(scale.x, scale.y, scale.z))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: color,
@@ -272,14 +283,22 @@ pub fn move_camera_on_rail(
 pub fn update_weather_overlay(
     runtime: Res<WeatherRuntime>,
     diagnostics: Res<WeatherDiagnostics>,
-    primary_camera: Query<&WeatherCameraState, With<PrimaryShowcaseCamera>>,
+    visual_diagnostics: Res<WeatherVisualDiagnostics>,
+    primary_camera: Query<
+        (&WeatherCameraState, Option<&WeatherCameraVisualState>),
+        With<PrimaryShowcaseCamera>,
+    >,
     mut overlay: Query<&mut Text, With<ShowcaseOverlay>>,
 ) {
     let Ok(mut text) = overlay.single_mut() else {
         return;
     };
 
-    let camera_lines = if let Ok(camera) = primary_camera.single() {
+    let camera_lines = if let Ok((camera, visuals)) = primary_camera.single() {
+        let screen_fx = visuals
+            .map(|state| state.screen.overlay_intensity)
+            .unwrap_or_default();
+        let active_particles = visuals.map(|state| state.active_particles).unwrap_or(0);
         format!(
             "Camera base {}  resolved {}  zone {}\nPrecip {:?} {:>4.2}  Screen {:>4.2}\nFog {:>4.2}  Visibility {:>6.1}  Far {:>4.2}\nWind [{:>5.2}, {:>5.2}, {:>5.2}] x {:>4.2}  Particles {}\nWetness {:>4.2}  Lightning {:>4.2}",
             camera.base_profile_label.as_deref().unwrap_or("Unnamed"),
@@ -290,7 +309,7 @@ pub fn update_weather_overlay(
             camera.zone_label.as_deref().unwrap_or("Global"),
             camera.precipitation_kind,
             camera.precipitation_factor,
-            camera.screen_fx_factor,
+            screen_fx,
             camera.fog_density,
             camera.visibility_distance,
             camera.far_density,
@@ -298,7 +317,7 @@ pub fn update_weather_overlay(
             camera.wind_vector.y,
             camera.wind_vector.z,
             camera.wind_influence,
-            camera.active_particles,
+            active_particles,
             camera.wetness_factor,
             camera.lightning_flash_intensity,
         )
@@ -315,12 +334,12 @@ pub fn update_weather_overlay(
         runtime.factors.wind_factor,
         runtime.factors.wetness_factor,
         runtime.factors.storm_factor,
-        diagnostics.quality,
+        visual_diagnostics.quality,
         diagnostics.current_fog_density,
         diagnostics.current_precipitation_kind,
-        diagnostics.active_emitters,
-        diagnostics.precipitation_particles_estimate,
-        diagnostics.managed_screen_overlays,
+        visual_diagnostics.active_emitters,
+        visual_diagnostics.precipitation_particles_estimate,
+        visual_diagnostics.managed_screen_overlays,
         diagnostics.transition_started_count,
         diagnostics.transition_finished_count,
         diagnostics.profile_changed_count,
@@ -341,22 +360,27 @@ fn sync_demo_pane(
     pane: Res<WeatherDemoPane>,
     mut pane_state: ResMut<WeatherDemoPaneState>,
     mut config: ResMut<WeatherConfig>,
+    mut visuals: ResMut<WeatherVisualsConfig>,
 ) {
-    let desired_transition = pane.transition_duration_secs.max(0.05);
-    let desired_quality = index_to_quality(pane.quality_index);
-    let desired_screen_fx_mode = if pane.built_in_overlays {
-        WeatherScreenFxMode::BuiltInOverlay
-    } else {
-        WeatherScreenFxMode::StateOnly
-    };
-    if (config.default_transition_duration_secs - desired_transition).abs() > f32::EPSILON {
-        config.default_transition_duration_secs = desired_transition;
+    if (pane.transition_duration_secs - pane_state.last_transition_duration_secs).abs()
+        > f32::EPSILON
+    {
+        config.default_transition_duration_secs = pane.transition_duration_secs.max(0.05);
+        pane_state.last_transition_duration_secs = pane.transition_duration_secs;
     }
-    if config.quality != desired_quality {
-        config.quality = desired_quality;
+
+    if pane.quality_index != pane_state.last_quality_index {
+        visuals.quality = index_to_quality(pane.quality_index);
+        pane_state.last_quality_index = pane.quality_index;
     }
-    if config.screen_fx_mode != desired_screen_fx_mode {
-        config.screen_fx_mode = desired_screen_fx_mode;
+
+    if pane.built_in_overlays != pane_state.last_built_in_overlays {
+        visuals.screen_fx_mode = if pane.built_in_overlays {
+            WeatherScreenFxMode::BuiltInOverlay
+        } else {
+            WeatherScreenFxMode::StateOnly
+        };
+        pane_state.last_built_in_overlays = pane.built_in_overlays;
     }
 
     if pane.profile_index != pane_state.last_profile_index {
@@ -383,6 +407,8 @@ fn spawn_shelter(
 ) {
     commands.spawn((
         Name::new("Shelter Roof"),
+        WeatherSurface::default(),
+        WeatherSurfaceStandardMaterial::default(),
         Mesh3d(meshes.add(Cuboid::new(12.0, 0.6, 8.0))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.18, 0.20, 0.24),
@@ -403,6 +429,8 @@ fn spawn_shelter(
     {
         commands.spawn((
             Name::new(format!("Shelter Column {}", index + 1)),
+            WeatherSurface::default(),
+            WeatherSurfaceStandardMaterial::default(),
             Mesh3d(meshes.add(Cuboid::new(0.55, 4.0, 0.55))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.48, 0.45, 0.38),

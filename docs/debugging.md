@@ -1,40 +1,44 @@
 # Debugging
 
-## Diagnostics Resource
+## Core Diagnostics
 
-`WeatherDiagnostics` is the main high-level summary.
+`WeatherDiagnostics` summarizes the core solver state.
 
 Important fields:
 
-- `active_profile_label`: resolved global profile label
-- `target_profile_label`: current transition target label
-- `quality`: active quality tier used for particle and screen-FX budgeting
-- `transition_progress`: `0.0..=1.0`
-- `transition_active`: whether a transition is still running
-- `active_emitters`: number of live precipitation emitter roots
-- `precipitation_particles_estimate`: summed active particle count across weather cameras
-- `active_zone_count`: number of currently contributing zones on the primary camera
-- `current_wind`: resolved global wind vector
-- `current_fog_density`: resolved global fog density after authored blending
-- `current_visibility_distance`: resolved global visibility hint
-- `current_precipitation_kind`: resolved global precipitation mode
-- `primary_camera_name`: highest-priority active weather camera
-- `primary_zone_label`: dominant local zone on that camera
-- `managed_screen_overlays`: number of live overlay entities
-- `last_transition_started_at`: elapsed solver time of the last smooth transition start
-- `last_transition_finished_at`: elapsed solver time of the last completion
-- `last_lightning_flash_id`: last deterministic lightning flash id emitted
-- `transition_started_count`, `transition_finished_count`, `profile_changed_count`, `lightning_flash_count`: cumulative crate-level message counts since activation
+- `active_profile_label`
+- `target_profile_label`
+- `transition_progress`
+- `transition_active`
+- `active_zone_count`
+- `current_wind`
+- `current_fog_density`
+- `current_visibility_distance`
+- `current_precipitation_kind`
+- `primary_camera_name`
+- `primary_zone_label`
+- `last_transition_started_at`
+- `last_transition_finished_at`
+- `last_lightning_flash_id`
+- `transition_started_count`
+- `transition_finished_count`
+- `profile_changed_count`
+- `lightning_flash_count`
 
-For camera-specific inspection, query `WeatherCameraState` on the camera entity rather than relying only on `WeatherDiagnostics`.
+Use `WeatherCameraState` when you need local weather rather than the global summary.
 
-Key `WeatherCameraState` fields for local debugging:
+## Visual Diagnostics
 
-- `base_profile_label`: global transitioned label before local overrides
-- `resolved_profile_label`: actual label after zone blending for that camera
-- `zone_label`: dominant contributing zone
-- `wind_influence`: authored precipitation wind response used by the local emitter
-- `far_density`: far-field atmospheric density hint for that camera
+`WeatherVisualDiagnostics` belongs to the bundled visual adapter.
+
+Important fields:
+
+- `quality`
+- `active_emitters`
+- `precipitation_particles_estimate`
+- `managed_screen_overlays`
+
+Use `WeatherCameraVisualState` for per-camera bundled visual state such as overlay intensity and active particle count.
 
 ## BRP Workflow
 
@@ -49,24 +53,18 @@ Useful queries:
 ```bash
 uv run --project .codex/skills/bevy-brp/script brp resource get saddle_world_weather::resources::WeatherRuntime
 uv run --project .codex/skills/bevy-brp/script brp resource get saddle_world_weather::resources::WeatherDiagnostics
+uv run --project .codex/skills/bevy-brp/script brp resource get saddle_world_weather::resources::WeatherVisualDiagnostics
 uv run --project .codex/skills/bevy-brp/script brp resource get saddle_world_weather::resources::WeatherConfig
+uv run --project .codex/skills/bevy-brp/script brp resource get saddle_world_weather::resources::WeatherVisualsConfig
 uv run --project .codex/skills/bevy-brp/script brp world query saddle_world_weather::WeatherCamera
 uv run --project .codex/skills/bevy-brp/script brp world query saddle_world_weather::WeatherCameraState
+uv run --project .codex/skills/bevy-brp/script brp world query saddle_world_weather::WeatherCameraVisualState
+uv run --project .codex/skills/bevy-brp/script brp world query saddle_world_weather::WeatherSurfaceState
 uv run --project .codex/skills/bevy-brp/script brp world query saddle_world_weather::WeatherZone
 uv run --project .codex/skills/bevy-brp/script brp world query saddle_world_weather::WeatherOcclusionVolume
 uv run --project .codex/skills/bevy-brp/script brp extras screenshot /tmp/weather_debug.png
 uv run --project .codex/skills/bevy-brp/script brp extras shutdown
 ```
-
-Type paths to remember:
-
-- `saddle_world_weather::resources::WeatherRuntime`
-- `saddle_world_weather::resources::WeatherDiagnostics`
-- `saddle_world_weather::resources::WeatherConfig`
-- `saddle_world_weather::WeatherCamera`
-- `saddle_world_weather::WeatherCameraState`
-- `saddle_world_weather::WeatherZone`
-- `saddle_world_weather::WeatherOcclusionVolume`
 
 ## Common Failure Modes
 
@@ -75,13 +73,13 @@ Type paths to remember:
 Check:
 
 - the camera has `WeatherCamera`
-- `receive_precipitation = true`
-- the resolved `WeatherCameraState.precipitation_factor > 0.0`
-- `WeatherDiagnostics.active_emitters > 0`
-- quality is not set to a tiny budget by `WeatherQuality` plus camera `quality_bias`
+- `WeatherCamera.receive_precipitation = true`
+- `WeatherCameraState.precipitation_factor > 0.0`
+- `WeatherVisualDiagnostics.active_emitters > 0`
+- `WeatherVisualsConfig.quality` plus camera `quality_bias`
 - a shelter volume or `precipitation_blocked_factor` is not suppressing the camera
 
-### Fog looks wrong or too dense
+### Fog looks wrong
 
 Check:
 
@@ -89,39 +87,43 @@ Check:
 - `WeatherCamera.insert_missing_components`
 - `WeatherCameraState.fog_density`
 - `WeatherCameraState.visibility_distance`
-- whether a local `WeatherZone` is overriding the global profile on the active camera
+- whether a local `WeatherZone` is overriding the global profile
 
-If the fog reads heavier than expected, inspect the active local zone first. The per-camera state is authoritative.
-
-### Screen FX are too intrusive
+### Screen overlays are too intrusive
 
 Check:
 
 - `WeatherCamera.receive_screen_fx`
-- `WeatherQuality` because `Low` disables screen FX
-- `WeatherCameraState.screen_fx_factor`
+- `WeatherVisualsConfig.quality`
+- `WeatherVisualsConfig.screen_fx_mode`
+- `WeatherCameraVisualState.screen.overlay_intensity`
 - whether the camera is inside a `WeatherOcclusionVolume`
 
-For gameplay cameras, disabling `receive_screen_fx` is the intended coarse control.
+### Material response is missing
+
+Check:
+
+- the entity has `WeatherSurface`
+- the entity has `WeatherSurfaceStandardMaterial`
+- the entity has `MeshMaterial3d<StandardMaterial>`
+- `WeatherSurfaceState` is being published
 
 ### Transitions pop or never finish
 
 Check:
 
-- that you are using `queue_transition` instead of repeatedly overwriting `pending_request` every frame
+- that you are using `queue_transition` instead of rewriting `pending_request` every frame
 - `WeatherRuntime.transition.active`
 - `WeatherRuntime.transition.progress`
 - `WeatherDiagnostics.last_transition_started_at`
 - `WeatherDiagnostics.last_transition_finished_at`
 
-If transitions are not deterministic in tests, verify the app is stepping time manually and that the seed remains fixed.
-
-### Lightning messages arrive but visuals do not change enough
+### Lightning messages arrive but the scene still looks calm
 
 Current scope:
 
 - lightning drives `LightningFlashEmitted`
-- the active camera state exposes `lightning_flash_intensity`
-- cameras that allow screen FX receive a brief overlay flash
+- `WeatherCameraState.lightning_flash_intensity` exposes the resolved flash
+- the bundled visual adapter may turn that into a brief overlay cue
 
-The crate does not currently modulate world lights or clouds. If a downstream app needs stronger scene-wide flashes, read `lightning_flash_intensity` or `LightningFlashEmitted` and layer its own lighting response.
+If a downstream app needs stronger whole-scene flashes, read the core lightning signal and layer its own light or atmosphere response.

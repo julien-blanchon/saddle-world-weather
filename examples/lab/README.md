@@ -15,27 +15,27 @@ Working
 ## Run
 
 ```bash
-cargo run -p weather_lab
+cargo run -p saddle-world-weather-lab
 ```
 
 ## E2E
 
 ```bash
-cargo run -p weather_lab --features e2e -- weather_smoke
-cargo run -p weather_lab --features e2e -- weather_transition_gallery
-cargo run -p weather_lab --features e2e -- weather_shelter_occlusion
-cargo run -p weather_lab --features e2e -- weather_storm_flash
-cargo run -p weather_lab --features e2e -- weather_quality_compare
+cargo run -p saddle-world-weather-lab --features e2e -- weather_smoke
+cargo run -p saddle-world-weather-lab --features e2e -- weather_transition_gallery
+cargo run -p saddle-world-weather-lab --features e2e -- weather_shelter_occlusion
+cargo run -p saddle-world-weather-lab --features e2e -- weather_storm_flash
+cargo run -p saddle-world-weather-lab --features e2e -- weather_quality_compare
 ```
 
 ## BRP
 
 ```bash
-uv run --project .codex/skills/bevy-brp/script brp app launch weather_lab
+uv run --project .codex/skills/bevy-brp/script brp app launch saddle-world-weather-lab
 uv run --project .codex/skills/bevy-brp/script brp resource get weather::WeatherRuntime
 uv run --project .codex/skills/bevy-brp/script brp resource get weather::WeatherDiagnostics
 uv run --project .codex/skills/bevy-brp/script brp world query weather::WeatherCameraState
-uv run --project .codex/skills/bevy-brp/script brp extras screenshot /tmp/weather_lab.png
+uv run --project .codex/skills/bevy-brp/script brp extras screenshot /tmp/saddle-world-weather-lab.png
 uv run --project .codex/skills/bevy-brp/script brp extras shutdown
 ```
 

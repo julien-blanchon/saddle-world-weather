@@ -1,7 +1,10 @@
 use saddle_world_weather_example_support as support;
 
 use bevy::{camera::Viewport, prelude::*};
-use saddle_world_weather::{WeatherConfig, WeatherPlugin, WeatherProfile, WeatherQuality};
+use saddle_world_weather::{
+    WeatherCameraVisualState, WeatherConfig, WeatherPlugin, WeatherProfile, WeatherQuality,
+    WeatherSurfaceMaterialsPlugin, WeatherVisualsConfig, WeatherVisualsPlugin,
+};
 
 #[derive(Component)]
 struct LeftCamera;
@@ -14,9 +17,12 @@ struct SplitOverlay;
 
 fn main() {
     let config = WeatherConfig {
-        quality: WeatherQuality::High,
         initial_profile: WeatherProfile::storm(),
         seed: 99,
+        ..default()
+    };
+    let visuals = WeatherVisualsConfig {
+        quality: WeatherQuality::High,
         ..default()
     };
     let mut app = App::new();
@@ -34,8 +40,12 @@ fn main() {
         }),
         ..default()
     }));
-    support::install_demo_pane(&mut app, &config);
-    app.add_plugins(WeatherPlugin::default().with_config(config));
+    support::install_demo_pane(&mut app, &config, &visuals);
+    app.add_plugins((
+        WeatherPlugin::default().with_config(config),
+        WeatherVisualsPlugin::default().with_config(visuals),
+        WeatherSurfaceMaterialsPlugin::default(),
+    ));
     app.add_systems(Startup, setup);
     app.add_systems(Update, (support::animate_props, update_split_overlay));
     app.run();
@@ -108,8 +118,20 @@ fn setup(
 }
 
 fn update_split_overlay(
-    left: Query<&saddle_world_weather::WeatherCameraState, With<LeftCamera>>,
-    right: Query<&saddle_world_weather::WeatherCameraState, With<RightCamera>>,
+    left: Query<
+        (
+            &saddle_world_weather::WeatherCameraState,
+            Option<&WeatherCameraVisualState>,
+        ),
+        With<LeftCamera>,
+    >,
+    right: Query<
+        (
+            &saddle_world_weather::WeatherCameraState,
+            Option<&WeatherCameraVisualState>,
+        ),
+        With<RightCamera>,
+    >,
     mut overlay: Query<&mut Text, With<SplitOverlay>>,
 ) {
     let Ok(mut text) = overlay.single_mut() else {
@@ -118,19 +140,25 @@ fn update_split_overlay(
 
     let left_line = left
         .single()
-        .map(|state| {
+        .map(|(_, visuals)| {
             format!(
                 "Left viewport: gameplay clarity, screen_fx={:>4.2}, particles={}",
-                state.screen_fx_factor, state.active_particles
+                visuals
+                    .map(|state| state.screen.overlay_intensity)
+                    .unwrap_or_default(),
+                visuals.map(|state| state.active_particles).unwrap_or(0)
             )
         })
         .unwrap_or_else(|_| "Left viewport unavailable".into());
     let right_line = right
         .single()
-        .map(|state| {
+        .map(|(_, visuals)| {
             format!(
                 "Right viewport: cinematic, screen_fx={:>4.2}, particles={}",
-                state.screen_fx_factor, state.active_particles
+                visuals
+                    .map(|state| state.screen.overlay_intensity)
+                    .unwrap_or_default(),
+                visuals.map(|state| state.active_particles).unwrap_or(0)
             )
         })
         .unwrap_or_else(|_| "Right viewport unavailable".into());

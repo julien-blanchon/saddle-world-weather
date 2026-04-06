@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
 use crate::{
-    FogProfile, PrecipitationKind, ScreenFxProfile, StormProfile, VisibilityClass, WeatherFactors,
-    WeatherProfile, WeatherScreenState, WeatherVisibility, WindProfile, WindState,
+    FogProfile, PrecipitationKind, StormProfile, VisibilityClass, WeatherFactors, WeatherProfile,
+    WeatherVisibility, WindProfile, WindState,
     profiles::lerp_scalar,
     resources::{PrecipitationState, StormState},
 };
@@ -61,7 +61,6 @@ pub fn resolve_runtime(
     WindState,
     PrecipitationState,
     WeatherVisibility,
-    WeatherScreenState,
     StormState,
     WeatherFactors,
 ) {
@@ -70,7 +69,6 @@ pub fn resolve_runtime(
     let lightning = sample_lightning(seed, time_secs, &profile.storm);
     let precipitation = resolve_precipitation(&profile.precipitation);
     let visibility = resolve_visibility(&profile.fog, &profile.precipitation, &profile.storm);
-    let screen = resolve_screen_fx(&profile.screen_fx, &profile.precipitation, &profile.fog);
     let storm = StormState {
         intensity: profile.storm.intensity,
         lightning_active: lightning.active,
@@ -80,13 +78,12 @@ pub fn resolve_runtime(
     let factors = resolve_factors(
         &profile.precipitation,
         &profile.fog,
-        &profile.screen_fx,
         &profile.storm,
         &wind,
         lightning.intensity,
     );
 
-    (wind, precipitation, visibility, screen, storm, factors)
+    (wind, precipitation, visibility, storm, factors)
 }
 
 pub fn sample_gust(seed: u64, time_secs: f32, profile: &WindProfile) -> f32 {
@@ -292,25 +289,9 @@ fn resolve_visibility(
     }
 }
 
-fn resolve_screen_fx(
-    screen_fx: &ScreenFxProfile,
-    precipitation: &crate::PrecipitationProfile,
-    fog: &FogProfile,
-) -> WeatherScreenState {
-    let moisture = precipitation.intensity.max(fog.density * 0.45);
-    WeatherScreenState {
-        overlay_intensity: (screen_fx.intensity * (0.35 + moisture * 0.65)).clamp(0.0, 1.0),
-        droplet_intensity: (screen_fx.droplet_intensity * precipitation.intensity).clamp(0.0, 1.0),
-        frost_intensity: (screen_fx.frost_intensity * (0.25 + moisture * 0.75)).clamp(0.0, 1.0),
-        streak_intensity: (screen_fx.streak_intensity * precipitation.intensity).clamp(0.0, 1.0),
-        tint: screen_fx.tint,
-    }
-}
-
 fn resolve_factors(
     precipitation: &crate::PrecipitationProfile,
     fog: &FogProfile,
-    screen_fx: &ScreenFxProfile,
     storm: &StormProfile,
     wind: &WindState,
     lightning_intensity: f32,
@@ -334,10 +315,6 @@ fn resolve_factors(
         .max((precipitation.intensity * 0.8).clamp(0.0, 1.0));
     let wetness_factor =
         (rain_factor * 0.8 + fog_factor * 0.25 + storm.wetness_bonus).clamp(0.0, 1.0);
-    let screen_fx_factor = (screen_fx.intensity * 0.4
-        + screen_fx.droplet_intensity * 0.3
-        + screen_fx.frost_intensity * 0.3)
-        .clamp(0.0, 1.0);
 
     WeatherFactors {
         rain_factor,
@@ -346,7 +323,6 @@ fn resolve_factors(
         storm_factor,
         wind_factor,
         wetness_factor,
-        screen_fx_factor,
     }
 }
 

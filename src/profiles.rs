@@ -206,37 +206,6 @@ impl WindProfile {
 }
 
 #[derive(Debug, Clone, PartialEq, Reflect)]
-pub struct ScreenFxProfile {
-    pub intensity: f32,
-    pub droplet_intensity: f32,
-    pub frost_intensity: f32,
-    pub streak_intensity: f32,
-    pub tint: Color,
-}
-
-impl Default for ScreenFxProfile {
-    fn default() -> Self {
-        Self {
-            intensity: 0.0,
-            droplet_intensity: 0.0,
-            frost_intensity: 0.0,
-            streak_intensity: 0.0,
-            tint: Color::WHITE,
-        }
-    }
-}
-
-impl ScreenFxProfile {
-    pub fn clamped(mut self) -> Self {
-        self.intensity = self.intensity.clamp(0.0, 1.0);
-        self.droplet_intensity = self.droplet_intensity.clamp(0.0, 1.0);
-        self.frost_intensity = self.frost_intensity.clamp(0.0, 1.0);
-        self.streak_intensity = self.streak_intensity.clamp(0.0, 1.0);
-        self
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Reflect)]
 pub struct StormProfile {
     pub intensity: f32,
     pub lightning_frequency_hz: f32,
@@ -274,7 +243,6 @@ pub struct WeatherProfile {
     pub precipitation: PrecipitationProfile,
     pub fog: FogProfile,
     pub wind: WindProfile,
-    pub screen_fx: ScreenFxProfile,
     pub storm: StormProfile,
 }
 
@@ -291,7 +259,6 @@ impl WeatherProfile {
             precipitation: PrecipitationProfile::none(),
             fog: FogProfile::default(),
             wind: WindProfile::default(),
-            screen_fx: ScreenFxProfile::default(),
             storm: StormProfile::default(),
         }
     }
@@ -313,13 +280,6 @@ impl WeatherProfile {
                 gust_frequency_hz: 0.38,
                 sway: 0.42,
             },
-            screen_fx: ScreenFxProfile {
-                intensity: 0.34,
-                droplet_intensity: 0.40,
-                frost_intensity: 0.0,
-                streak_intensity: 0.28,
-                tint: Color::srgb(0.90, 0.96, 1.0),
-            },
             storm: StormProfile::default(),
         }
     }
@@ -340,13 +300,6 @@ impl WeatherProfile {
                 gust_amplitude: 0.42,
                 gust_frequency_hz: 0.28,
                 sway: 0.60,
-            },
-            screen_fx: ScreenFxProfile {
-                intensity: 0.26,
-                droplet_intensity: 0.0,
-                frost_intensity: 0.42,
-                streak_intensity: 0.12,
-                tint: Color::srgb(0.90, 0.94, 1.0),
             },
             storm: StormProfile {
                 intensity: 0.16,
@@ -372,13 +325,6 @@ impl WeatherProfile {
                 gust_amplitude: 0.08,
                 gust_frequency_hz: 0.12,
                 sway: 0.1,
-            },
-            screen_fx: ScreenFxProfile {
-                intensity: 0.10,
-                droplet_intensity: 0.0,
-                frost_intensity: 0.0,
-                streak_intensity: 0.0,
-                tint: Color::WHITE,
             },
             storm: StormProfile::default(),
         }
@@ -407,13 +353,6 @@ impl WeatherProfile {
                 gust_frequency_hz: 0.55,
                 sway: 0.95,
             },
-            screen_fx: ScreenFxProfile {
-                intensity: 0.54,
-                droplet_intensity: 0.52,
-                frost_intensity: 0.0,
-                streak_intensity: 0.46,
-                tint: Color::srgb(0.92, 0.95, 1.0),
-            },
             storm: StormProfile {
                 intensity: 1.0,
                 lightning_frequency_hz: 0.18,
@@ -428,7 +367,6 @@ impl WeatherProfile {
         self.precipitation = self.precipitation.clamped();
         self.fog = self.fog.clamped();
         self.wind = self.wind.clamped();
-        self.screen_fx = self.screen_fx.clamped();
         self.storm = self.storm.clamped();
 
         if self.storm.intensity > 0.7 && matches!(self.precipitation.kind, PrecipitationKind::None)
@@ -536,26 +474,6 @@ impl WeatherProfile {
                     t,
                 ),
                 sway: lerp_scalar(self.wind.sway, other.wind.sway, t),
-            }
-            .clamped(),
-            screen_fx: ScreenFxProfile {
-                intensity: lerp_scalar(self.screen_fx.intensity, other.screen_fx.intensity, t),
-                droplet_intensity: lerp_scalar(
-                    self.screen_fx.droplet_intensity,
-                    other.screen_fx.droplet_intensity,
-                    t,
-                ),
-                frost_intensity: lerp_scalar(
-                    self.screen_fx.frost_intensity,
-                    other.screen_fx.frost_intensity,
-                    t,
-                ),
-                streak_intensity: lerp_scalar(
-                    self.screen_fx.streak_intensity,
-                    other.screen_fx.streak_intensity,
-                    t,
-                ),
-                tint: lerp_color(self.screen_fx.tint, other.screen_fx.tint, t),
             }
             .clamped(),
             storm: StormProfile {

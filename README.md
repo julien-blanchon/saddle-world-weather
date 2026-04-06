@@ -1,53 +1,61 @@
 # Saddle World Weather
 
-Reusable Bevy weather orchestration for authored profiles, deterministic transitions, camera-local precipitation, fog sync, wind, shelter suppression, local override zones, optional screen-space weather cues, and opt-in surface wetness / puddle / snow accumulation.
+Reusable Bevy weather orchestration centered on a pure weather-state engine plus opt-in presentation adapters.
 
-The crate stays shared-crate safe:
+Core features:
 
-- no project-specific imports
-- `bevy = "0.18"` pinned directly
-- injectable activate, deactivate, and update schedules
-- public `WeatherSystems` for downstream ordering
-- pure-Rust profile blending, wind sampling, zone blending, occlusion resolution, and lightning timing logic
+- authored `WeatherProfile` blending for precipitation, fog, wind, and storms
+- deterministic transitions, gust sampling, lightning timing, zone blending, and shelter suppression
+- per-camera resolved weather state for downstream rendering or gameplay
+- per-surface wetness / puddle / snow accumulation state without forcing a render policy
+
+Optional built-in adapters:
+
+- `WeatherVisualsPlugin` for camera-local precipitation, `DistanceFog`, and screen overlays
+- `WeatherSurfaceMaterialsPlugin` for `StandardMaterial` wetness / snow modulation
 
 ## Quick Start
 
 ```rust
 use bevy::prelude::*;
-use saddle_world_weather::{WeatherConfig, WeatherPlugin, WeatherProfile, WeatherSystems};
+use saddle_world_weather::{
+    WeatherConfig, WeatherPlugin, WeatherProfile, WeatherSurfaceMaterialsPlugin,
+    WeatherVisualsConfig, WeatherVisualsPlugin,
+};
+
+let weather = WeatherConfig {
+    initial_profile: WeatherProfile::rain(),
+    ..default()
+};
+
+let visuals = WeatherVisualsConfig::default();
 
 let mut app = App::new();
 app.add_plugins(DefaultPlugins);
-app.add_plugins(
-    WeatherPlugin::new(
+app.add_plugins((
+    WeatherPlugin::new(OnEnter(MyState::Gameplay), OnExit(MyState::Gameplay), Update)
+        .with_config(weather),
+    WeatherVisualsPlugin::new(OnEnter(MyState::Gameplay), OnExit(MyState::Gameplay), Update)
+        .with_config(visuals),
+    WeatherSurfaceMaterialsPlugin::new(
         OnEnter(MyState::Gameplay),
         OnExit(MyState::Gameplay),
         Update,
-    )
-    .with_config(WeatherConfig {
-        initial_profile: WeatherProfile::rain(),
-        ..default()
-    }),
-);
-
-app.configure_sets(
-    Update,
-    WeatherSystems::ResolveBaseState.in_set(MyGameSet::Simulation),
-);
+    ),
+));
 ```
 
-Attach `WeatherCamera` to any camera that should receive precipitation, fog sync, or screen-space cues. Add `WeatherZone` and `WeatherOcclusionVolume` when you need local overrides or shelter suppression.
+Use only `WeatherPlugin` if another crate owns precipitation, fog, post-processing, or material response. Add `WeatherVisualsPlugin` and `WeatherSurfaceMaterialsPlugin` only where you want the bundled adapters.
 
 ## Public API
 
-### Plugin
+Plugins:
 
 - `WeatherPlugin`
-- `WeatherPlugin::new(activate_schedule, deactivate_schedule, update_schedule)`
-- `WeatherPlugin::always_on(update_schedule)`
-- `WeatherPlugin::with_config(config)`
+- `WeatherVisualsPlugin`
+- `WeatherSurfaceMaterialsPlugin`
 
-### Resources
+Core resources:
 
 - `WeatherConfig`
 - `WeatherRuntime`
@@ -57,46 +65,48 @@ Attach `WeatherCamera` to any camera that should receive precipitation, fog sync
 - `WindState`
 - `PrecipitationState`
 - `WeatherVisibility`
-- `WeatherScreenFxMode`
-- `WeatherScreenState`
 - `StormState`
 - `WeatherFactors`
 
-### Components
+Visual adapter resources:
+
+- `WeatherVisualsConfig`
+- `WeatherVisualDiagnostics`
+- `WeatherQuality`
+- `WeatherScreenFxMode`
+- `WeatherScreenFxSettings`
+- `WeatherScreenState`
+
+Components:
 
 - `WeatherCamera`
-- `WeatherCameraState` (base and resolved labels, local precipitation/fog/wind state)
+- `WeatherCameraState`
+- `WeatherCameraVisualState`
 - `WeatherSurface`
 - `WeatherSurfaceState`
+- `WeatherSurfaceStandardMaterial`
 - `WeatherZone`
 - `WeatherOcclusionVolume`
 - `WeatherVolumeShape`
 
-### Messages
+System sets:
+
+- `WeatherSystems`
+- `WeatherVisualSystems`
+- `WeatherSurfaceMaterialSystems`
+
+Messages:
 
 - `WeatherTransitionStarted`
 - `WeatherTransitionFinished`
 - `WeatherProfileChanged`
 - `LightningFlashEmitted`
 
-### System Sets
-
-- `WeatherSystems::ApplyRequests`
-- `WeatherSystems::AdvanceTransition`
-- `WeatherSystems::ResolveBaseState`
-- `WeatherSystems::SyncSurfaces`
-- `WeatherSystems::ResolveCameraState`
-- `WeatherSystems::SyncEmitters`
-- `WeatherSystems::SyncFog`
-- `WeatherSystems::SyncScreenEffects`
-- `WeatherSystems::EmitMessages`
-- `WeatherSystems::Diagnostics`
-
 ## Examples
 
 | Example | Purpose |
 |--------|---------|
-| `basic` | Minimal clear-to-rain loop with one weather camera and overlay diagnostics |
+| `basic` | Minimal clear-to-rain loop with one weather camera and the bundled visual adapters |
 | `transitions` | Cycles through clear, foggy, rain, storm, and snow authored profiles |
 | `windy_snow` | Shows a gust-heavy snow profile with stronger lateral drift |
 | `localized_zones` | Demonstrates fog and storm pockets blending around the active camera |
@@ -106,19 +116,17 @@ Attach `WeatherCamera` to any camera that should receive precipitation, fog sync
 
 ## Design Notes
 
-- Precipitation is camera-local and recycled. The crate does not attempt full-map literal particle simulation.
-- `WeatherCameraState` separates the global transitioned label from the camera-local resolved label so BRP inspection can distinguish “global clear” from “local storm pocket”.
-- Fog sync uses Bevy `DistanceFog` on opted-in cameras.
-- `WeatherSurface` opts meshes with `MeshMaterial3d<StandardMaterial>` into crate-managed wetness, puddle reflectance, and snow coverage updates. The first sync clones the material handle so weather does not mutate shared authoring assets in place.
-- Lightning is currently a deterministic screen-space flash cue plus message surface, not a sky-lightning or thunder system.
-- Quality scaling changes particle budgets and screen-effect participation without leaking backend details into the public API, and `WeatherDiagnostics` exposes the active quality tier plus message counters for runtime debugging.
-- Built-in screen overlays are now optional. Set `WeatherConfig::screen_fx_mode` to `WeatherScreenFxMode::StateOnly` when another crate owns the final post-process composition and you only want `WeatherCameraState` / `WeatherRuntime` as inputs.
+- `WeatherPlugin` no longer owns rendering policy. It resolves weather state only.
+- `WeatherCameraState` is the core signal surface for local weather. `WeatherCameraVisualState` is adapter output.
+- `WeatherSurfaceState` stays in the core crate so gameplay and rendering can both consume wetness data.
+- `WeatherSurfaceStandardMaterial` is explicitly adapter-side. It is safe to omit if another material system owns the response.
+- Built-in precipitation remains camera-local and CPU-managed. The public API is structured so another adapter can replace it.
 
 ## Limitations
 
-- No volumetric cloud or sky rendering. Pair this crate with a dedicated sky or day-night system if needed.
-- No GPU particle backend. The default implementation uses crate-owned CPU-managed precipitation emitters.
-- Surface modulation currently targets `StandardMaterial` via `MeshMaterial3d<StandardMaterial>` and does not yet provide non-PBR or custom-material adapters.
+- No volumetric cloud or sky rendering.
+- No GPU precipitation backend in the bundled adapter.
+- The built-in material adapter only targets `MeshMaterial3d<StandardMaterial>`.
 
 ## Documentation
 

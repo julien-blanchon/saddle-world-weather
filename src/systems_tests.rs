@@ -9,9 +9,10 @@ use bevy::{
 };
 
 use crate::{
-    LightningFlashEmitted, WeatherCamera, WeatherCameraState, WeatherConfig, WeatherDiagnostics,
-    WeatherOcclusionVolume, WeatherPlugin, WeatherProfile, WeatherProfileChanged, WeatherRuntime,
-    WeatherSystems, WeatherTransitionFinished, WeatherTransitionStarted, WeatherVolumeShape,
+    LightningFlashEmitted, WeatherCamera, WeatherCameraState, WeatherCameraVisualState,
+    WeatherConfig, WeatherDiagnostics, WeatherOcclusionVolume, WeatherPlugin, WeatherProfile,
+    WeatherProfileChanged, WeatherRuntime, WeatherSystems, WeatherTransitionFinished,
+    WeatherTransitionStarted, WeatherVisualDiagnostics, WeatherVisualsPlugin, WeatherVolumeShape,
     WeatherZone,
 };
 
@@ -57,7 +58,10 @@ fn init_scheduled_app() -> App {
     app.init_schedule(Activate);
     app.init_schedule(Deactivate);
     app.init_schedule(Tick);
-    app.add_plugins(WeatherPlugin::new(Activate, Deactivate, Tick));
+    app.add_plugins((
+        WeatherPlugin::new(Activate, Deactivate, Tick),
+        WeatherVisualsPlugin::new(Activate, Deactivate, Tick),
+    ));
     app.insert_resource(MessageCounts::default());
     app.add_systems(Tick, count_messages.after(WeatherSystems::EmitMessages));
     app
@@ -72,7 +76,7 @@ fn init_always_on_app() -> App {
     app.init_resource::<Assets<Mesh>>();
     app.init_resource::<Assets<StandardMaterial>>();
     app.init_resource::<Assets<Image>>();
-    app.add_plugins(WeatherPlugin::default());
+    app.add_plugins((WeatherPlugin::default(), WeatherVisualsPlugin::default()));
     app.insert_resource(MessageCounts::default());
     app.add_systems(Update, count_messages.after(WeatherSystems::EmitMessages));
     app
@@ -121,6 +125,7 @@ fn plugin_builds_and_initializes_resources() {
     assert!(app.world().contains_resource::<WeatherConfig>());
     assert!(app.world().contains_resource::<WeatherRuntime>());
     assert!(app.world().contains_resource::<WeatherDiagnostics>());
+    assert!(app.world().contains_resource::<WeatherVisualDiagnostics>());
     assert!(
         app.world()
             .contains_resource::<Messages<WeatherTransitionStarted>>()
@@ -208,7 +213,7 @@ fn emitter_lifecycle_spawns_and_cleans_up() {
     assert!(emitter_count >= 1);
     assert!(
         app.world()
-            .get::<WeatherCameraState>(camera)
+            .get::<WeatherCameraVisualState>(camera)
             .is_some_and(|state| state.active_particles > 0)
     );
 
@@ -226,8 +231,8 @@ fn emitter_lifecycle_spawns_and_cleans_up() {
     assert_eq!(emitter_count, 0);
     assert_eq!(
         app.world()
-            .get::<WeatherCameraState>(camera)
-            .expect("camera state should exist")
+            .get::<WeatherCameraVisualState>(camera)
+            .expect("camera visual state should exist")
             .active_particles,
         0
     );
@@ -259,6 +264,11 @@ fn deactivate_schedule_cleans_runtime_entities_and_camera_state() {
     };
     assert_eq!(emitter_count, 0);
     assert!(app.world().get::<WeatherCameraState>(camera).is_none());
+    assert!(
+        app.world()
+            .get::<WeatherCameraVisualState>(camera)
+            .is_none()
+    );
 }
 
 #[test]

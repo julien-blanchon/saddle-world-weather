@@ -28,6 +28,13 @@ pub(super) fn diagnostics(world: &World) -> saddle_world_weather::WeatherDiagnos
         .expect("WeatherDiagnostics resource should exist")
 }
 
+pub(super) fn visual_diagnostics(world: &World) -> saddle_world_weather::WeatherVisualDiagnostics {
+    world
+        .get_resource::<saddle_world_weather::WeatherVisualDiagnostics>()
+        .cloned()
+        .expect("WeatherVisualDiagnostics resource should exist")
+}
+
 pub(super) fn camera_state(world: &mut World) -> saddle_world_weather::WeatherCameraState {
     let mut query = world
         .query_filtered::<&saddle_world_weather::WeatherCameraState, With<PrimaryShowcaseCamera>>();
@@ -36,6 +43,16 @@ pub(super) fn camera_state(world: &mut World) -> saddle_world_weather::WeatherCa
         .next()
         .cloned()
         .expect("primary camera state should exist")
+}
+
+pub(super) fn camera_visual_state(
+    world: &mut World,
+) -> Option<saddle_world_weather::WeatherCameraVisualState> {
+    let mut query = world.query_filtered::<
+        &saddle_world_weather::WeatherCameraVisualState,
+        With<PrimaryShowcaseCamera>,
+    >();
+    query.iter(world).next().cloned()
 }
 
 pub(super) fn message_log(world: &World) -> crate::WeatherMessageLog {

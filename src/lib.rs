@@ -3,26 +3,29 @@ mod messages;
 mod profiles;
 mod resources;
 mod solver;
+mod surface_materials;
 mod surfaces;
 mod systems;
 mod visuals;
 
 pub use components::{
-    WeatherCamera, WeatherCameraState, WeatherOcclusionVolume, WeatherSurface, WeatherSurfaceState,
-    WeatherVolumeShape, WeatherZone,
+    WeatherCamera, WeatherCameraState, WeatherCameraVisualState, WeatherOcclusionVolume,
+    WeatherSurface, WeatherSurfaceStandardMaterial, WeatherSurfaceState, WeatherVolumeShape,
+    WeatherZone,
 };
 pub use messages::{
     LightningFlashEmitted, WeatherProfileChanged, WeatherTransitionFinished,
     WeatherTransitionStarted,
 };
 pub use profiles::{
-    FogProfile, PrecipitationKind, PrecipitationProfile, ScreenFxProfile, StormProfile,
-    WeatherProfile, WeatherQuality, WeatherQualityPlan, WindProfile,
+    FogProfile, PrecipitationKind, PrecipitationProfile, StormProfile, WeatherProfile,
+    WeatherQuality, WeatherQualityPlan, WindProfile,
 };
 pub use resources::{
     PrecipitationState, StormState, VisibilityClass, WeatherConfig, WeatherDiagnostics,
-    WeatherFactors, WeatherRuntime, WeatherScreenFxMode, WeatherScreenState, WeatherTransitionMode,
-    WeatherTransitionRequest, WeatherTransitionState, WeatherVisibility, WindState,
+    WeatherFactors, WeatherRuntime, WeatherScreenFxMode, WeatherScreenFxSettings,
+    WeatherScreenState, WeatherTransitionMode, WeatherTransitionRequest, WeatherTransitionState,
+    WeatherVisibility, WeatherVisualDiagnostics, WeatherVisualsConfig, WindState,
 };
 pub use solver::{
     LightningSample, OcclusionContribution, OcclusionResult, ZoneBlendResult, ZoneContribution,
@@ -42,11 +45,22 @@ pub enum WeatherSystems {
     ResolveBaseState,
     SyncSurfaces,
     ResolveCameraState,
+    EmitMessages,
+    Diagnostics,
+}
+
+#[derive(SystemSet, Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum WeatherVisualSystems {
+    ResolveState,
     SyncEmitters,
     SyncFog,
     SyncScreenEffects,
-    EmitMessages,
     Diagnostics,
+}
+
+#[derive(SystemSet, Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum WeatherSurfaceMaterialSystems {
+    ApplyMaterials,
 }
 
 #[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash)]
@@ -100,7 +114,6 @@ impl Plugin for WeatherPlugin {
             .init_resource::<WeatherDiagnostics>()
             .init_resource::<systems::PendingWeatherMessages>()
             .init_resource::<systems::WeatherInternalState>()
-            .init_resource::<visuals::WeatherVisualAssets>()
             .add_message::<WeatherTransitionStarted>()
             .add_message::<WeatherTransitionFinished>()
             .add_message::<WeatherProfileChanged>()
@@ -109,7 +122,6 @@ impl Plugin for WeatherPlugin {
             .register_type::<PrecipitationKind>()
             .register_type::<PrecipitationProfile>()
             .register_type::<PrecipitationState>()
-            .register_type::<ScreenFxProfile>()
             .register_type::<StormProfile>()
             .register_type::<StormState>()
             .register_type::<VisibilityClass>()
@@ -120,10 +132,7 @@ impl Plugin for WeatherPlugin {
             .register_type::<WeatherFactors>()
             .register_type::<WeatherOcclusionVolume>()
             .register_type::<WeatherProfile>()
-            .register_type::<WeatherQuality>()
             .register_type::<WeatherRuntime>()
-            .register_type::<WeatherScreenFxMode>()
-            .register_type::<WeatherScreenState>()
             .register_type::<WeatherSurface>()
             .register_type::<WeatherSurfaceState>()
             .register_type::<WeatherTransitionMode>()
@@ -140,7 +149,7 @@ impl Plugin for WeatherPlugin {
                 (
                     systems::deactivate_runtime,
                     systems::cleanup_runtime,
-                    surfaces::reset_surface_materials,
+                    surfaces::reset_surface_states,
                 )
                     .chain(),
             )
@@ -152,9 +161,6 @@ impl Plugin for WeatherPlugin {
                     WeatherSystems::ResolveBaseState,
                     WeatherSystems::SyncSurfaces,
                     WeatherSystems::ResolveCameraState,
-                    WeatherSystems::SyncEmitters,
-                    WeatherSystems::SyncFog,
-                    WeatherSystems::SyncScreenEffects,
                     WeatherSystems::EmitMessages,
                     WeatherSystems::Diagnostics,
                 )
@@ -180,7 +186,7 @@ impl Plugin for WeatherPlugin {
             )
             .add_systems(
                 self.update_schedule,
-                surfaces::sync_surface_materials
+                surfaces::sync_surface_states
                     .in_set(WeatherSystems::SyncSurfaces)
                     .run_if(systems::runtime_is_active),
             )
@@ -188,24 +194,6 @@ impl Plugin for WeatherPlugin {
                 self.update_schedule,
                 systems::resolve_camera_states
                     .in_set(WeatherSystems::ResolveCameraState)
-                    .run_if(systems::runtime_is_active),
-            )
-            .add_systems(
-                self.update_schedule,
-                visuals::sync_precipitation_emitters
-                    .in_set(WeatherSystems::SyncEmitters)
-                    .run_if(systems::runtime_is_active),
-            )
-            .add_systems(
-                self.update_schedule,
-                systems::sync_distance_fog
-                    .in_set(WeatherSystems::SyncFog)
-                    .run_if(systems::runtime_is_active),
-            )
-            .add_systems(
-                self.update_schedule,
-                visuals::sync_screen_effect_overlays
-                    .in_set(WeatherSystems::SyncScreenEffects)
                     .run_if(systems::runtime_is_active),
             )
             .add_systems(
@@ -218,6 +206,163 @@ impl Plugin for WeatherPlugin {
                 self.update_schedule,
                 systems::publish_diagnostics
                     .in_set(WeatherSystems::Diagnostics)
+                    .run_if(systems::runtime_is_active),
+            );
+    }
+}
+
+pub struct WeatherVisualsPlugin {
+    pub activate_schedule: Interned<dyn ScheduleLabel>,
+    pub deactivate_schedule: Interned<dyn ScheduleLabel>,
+    pub update_schedule: Interned<dyn ScheduleLabel>,
+    pub config: WeatherVisualsConfig,
+}
+
+impl WeatherVisualsPlugin {
+    pub fn new(
+        activate_schedule: impl ScheduleLabel,
+        deactivate_schedule: impl ScheduleLabel,
+        update_schedule: impl ScheduleLabel,
+    ) -> Self {
+        Self {
+            activate_schedule: activate_schedule.intern(),
+            deactivate_schedule: deactivate_schedule.intern(),
+            update_schedule: update_schedule.intern(),
+            config: WeatherVisualsConfig::default(),
+        }
+    }
+
+    pub fn always_on(update_schedule: impl ScheduleLabel) -> Self {
+        Self::new(PostStartup, NeverDeactivateSchedule, update_schedule)
+    }
+
+    pub fn with_config(mut self, config: WeatherVisualsConfig) -> Self {
+        self.config = config;
+        self
+    }
+}
+
+impl Default for WeatherVisualsPlugin {
+    fn default() -> Self {
+        Self::always_on(Update)
+    }
+}
+
+impl Plugin for WeatherVisualsPlugin {
+    fn build(&self, app: &mut App) {
+        if self.deactivate_schedule == NeverDeactivateSchedule.intern() {
+            app.init_schedule(NeverDeactivateSchedule);
+        }
+
+        app.insert_resource(self.config.clone())
+            .init_resource::<WeatherVisualDiagnostics>()
+            .init_resource::<visuals::WeatherVisualAssets>()
+            .register_type::<WeatherCameraVisualState>()
+            .register_type::<WeatherQuality>()
+            .register_type::<WeatherScreenFxMode>()
+            .register_type::<WeatherScreenFxSettings>()
+            .register_type::<WeatherScreenState>()
+            .register_type::<WeatherVisualDiagnostics>()
+            .register_type::<WeatherVisualsConfig>()
+            .add_systems(self.activate_schedule, visuals::activate_visuals)
+            .add_systems(self.deactivate_schedule, visuals::cleanup_visuals)
+            .configure_sets(
+                self.update_schedule,
+                (
+                    WeatherVisualSystems::ResolveState,
+                    WeatherVisualSystems::SyncEmitters,
+                    WeatherVisualSystems::SyncFog,
+                    WeatherVisualSystems::SyncScreenEffects,
+                    WeatherVisualSystems::Diagnostics,
+                )
+                    .chain(),
+            )
+            .configure_sets(
+                self.update_schedule,
+                WeatherVisualSystems::ResolveState.after(WeatherSystems::ResolveCameraState),
+            )
+            .add_systems(
+                self.update_schedule,
+                visuals::resolve_camera_visual_states
+                    .in_set(WeatherVisualSystems::ResolveState)
+                    .run_if(systems::runtime_is_active),
+            )
+            .add_systems(
+                self.update_schedule,
+                visuals::sync_precipitation_emitters
+                    .in_set(WeatherVisualSystems::SyncEmitters)
+                    .run_if(systems::runtime_is_active),
+            )
+            .add_systems(
+                self.update_schedule,
+                visuals::sync_distance_fog
+                    .in_set(WeatherVisualSystems::SyncFog)
+                    .run_if(systems::runtime_is_active),
+            )
+            .add_systems(
+                self.update_schedule,
+                visuals::sync_screen_effect_overlays
+                    .in_set(WeatherVisualSystems::SyncScreenEffects)
+                    .run_if(systems::runtime_is_active),
+            )
+            .add_systems(
+                self.update_schedule,
+                visuals::publish_visual_diagnostics
+                    .in_set(WeatherVisualSystems::Diagnostics)
+                    .run_if(systems::runtime_is_active),
+            );
+    }
+}
+
+pub struct WeatherSurfaceMaterialsPlugin {
+    pub activate_schedule: Interned<dyn ScheduleLabel>,
+    pub deactivate_schedule: Interned<dyn ScheduleLabel>,
+    pub update_schedule: Interned<dyn ScheduleLabel>,
+}
+
+impl WeatherSurfaceMaterialsPlugin {
+    pub fn new(
+        activate_schedule: impl ScheduleLabel,
+        deactivate_schedule: impl ScheduleLabel,
+        update_schedule: impl ScheduleLabel,
+    ) -> Self {
+        Self {
+            activate_schedule: activate_schedule.intern(),
+            deactivate_schedule: deactivate_schedule.intern(),
+            update_schedule: update_schedule.intern(),
+        }
+    }
+
+    pub fn always_on(update_schedule: impl ScheduleLabel) -> Self {
+        Self::new(PostStartup, NeverDeactivateSchedule, update_schedule)
+    }
+}
+
+impl Default for WeatherSurfaceMaterialsPlugin {
+    fn default() -> Self {
+        Self::always_on(Update)
+    }
+}
+
+impl Plugin for WeatherSurfaceMaterialsPlugin {
+    fn build(&self, app: &mut App) {
+        if self.deactivate_schedule == NeverDeactivateSchedule.intern() {
+            app.init_schedule(NeverDeactivateSchedule);
+        }
+
+        app.register_type::<WeatherSurfaceStandardMaterial>()
+            .add_systems(
+                self.deactivate_schedule,
+                surface_materials::reset_surface_materials,
+            )
+            .configure_sets(
+                self.update_schedule,
+                WeatherSurfaceMaterialSystems::ApplyMaterials.after(WeatherSystems::SyncSurfaces),
+            )
+            .add_systems(
+                self.update_schedule,
+                surface_materials::sync_surface_materials
+                    .in_set(WeatherSurfaceMaterialSystems::ApplyMaterials)
                     .run_if(systems::runtime_is_active),
             );
     }

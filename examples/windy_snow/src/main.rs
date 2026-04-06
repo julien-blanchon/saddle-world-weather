@@ -1,15 +1,23 @@
 use saddle_world_weather_example_support as support;
 
 use bevy::prelude::*;
-use saddle_world_weather::{WeatherConfig, WeatherPlugin, WeatherProfile, WeatherQuality};
+use saddle_world_weather::{
+    WeatherConfig, WeatherPlugin, WeatherProfile, WeatherQuality, WeatherSurfaceMaterialsPlugin,
+    WeatherVisualsConfig, WeatherVisualsPlugin,
+};
 
 fn main() {
     let config = WeatherConfig {
-        quality: WeatherQuality::High,
         initial_profile: windy_snow_profile(),
         seed: 42,
         ..default()
     };
+    let mut visuals = WeatherVisualsConfig {
+        quality: WeatherQuality::High,
+        ..default()
+    };
+    visuals.screen_fx.snow_intensity = 0.32;
+    visuals.screen_fx.frost_intensity = 0.55;
     let mut app = App::new();
     app.insert_resource(ClearColor(Color::srgb(0.60, 0.68, 0.78)));
     app.insert_resource(GlobalAmbientLight {
@@ -25,8 +33,12 @@ fn main() {
         }),
         ..default()
     }));
-    support::install_demo_pane(&mut app, &config);
-    app.add_plugins(WeatherPlugin::default().with_config(config));
+    support::install_demo_pane(&mut app, &config, &visuals);
+    app.add_plugins((
+        WeatherPlugin::default().with_config(config),
+        WeatherVisualsPlugin::default().with_config(visuals),
+        WeatherSurfaceMaterialsPlugin::default(),
+    ));
     app.add_systems(Startup, setup);
     app.add_systems(
         Update,
@@ -78,7 +90,5 @@ fn windy_snow_profile() -> WeatherProfile {
     profile.wind.gust_amplitude = 0.82;
     profile.wind.gust_frequency_hz = 0.55;
     profile.wind.sway = 0.95;
-    profile.screen_fx.intensity = 0.32;
-    profile.screen_fx.frost_intensity = 0.55;
     profile
 }

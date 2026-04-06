@@ -1,175 +1,163 @@
 # Architecture
 
+## Core vs Adapters
+
+The crate is split into one core weather-state plugin and two bundled adapters:
+
+- `WeatherPlugin`: authored profile blending, deterministic transitions, zone blending, shelter suppression, runtime weather state, camera weather state, surface accumulation state, and message emission
+- `WeatherVisualsPlugin`: camera-local precipitation emitters, `DistanceFog` sync, screen overlay cues, and visual diagnostics
+- `WeatherSurfaceMaterialsPlugin`: `StandardMaterial` mutation driven by `WeatherSurfaceState`
+
+This is the main architectural boundary:
+
+- core owns weather meaning
+- adapters own rendering policy
+
+If another project wants GPU precipitation, a custom post-process stack, or a different material system, it can skip the bundled adapters and consume the core state directly.
+
 ## Authored Model
 
-The authored surface is `WeatherProfile`. It is intentionally composable rather than a closed master enum.
+`WeatherProfile` is the authored input surface for the core solver. It owns four authored subdomains:
 
-Each profile owns five authored subdomains:
+- `PrecipitationProfile`
+- `FogProfile`
+- `WindProfile`
+- `StormProfile`
 
-- `PrecipitationProfile`: kind, density, fall speed, wind influence, near-camera bounds, far density, tint
-- `FogProfile`: fog color, density, visibility distance, volumetric hint
-- `WindProfile`: direction, base speed, gust amplitude, gust frequency, sway hint
-- `ScreenFxProfile`: overlay intensity, droplets, frost, streaks, tint
-- `StormProfile`: storm intensity, lightning frequency, flash duration, brightness, wetness bonus
-
-Helper constructors such as `WeatherProfile::clear()`, `rain()`, `snow()`, `foggy()`, and `storm()` are convenience presets only. Runtime logic reads fields, not a fixed enum.
+Notably absent: screen-space FX and material response. Those moved out of the authored weather profile so the weather engine no longer dictates lens-cue or shader policy.
 
 ## Runtime Model
 
 `WeatherRuntime` is the resolved global weather state after transition blending and seeded sampling. It contains:
 
-- `active_profile`: the currently blended authored profile
-- `target_profile`: the authored target profile
-- `transition`: progress, elapsed time, labels, active flag
-- `wind`: resolved direction, gust factor, final vector
-- `precipitation`: resolved kind, intensity, density, fall speed, presentation bounds
-- `visibility`: fog density, visibility distance, classification, fog color
-- `screen_fx`: resolved overlay and cue intensity
-- `storm`: resolved lightning state and current flash id
-- `factors`: normalized reaction hooks for rain, snow, fog, storm, wind, wetness, and screen FX
+- `active_profile`
+- `target_profile`
+- `transition`
+- `wind`
+- `precipitation`
+- `visibility`
+- `storm`
+- `factors`
 
-`WeatherCameraState` is the per-camera resolved state after local zones and occlusion volumes are applied. It keeps both:
+`WeatherCameraState` is the per-camera resolved core state after local zones and occlusion volumes are applied. It keeps both:
 
-- `base_profile_label`: the global transitioned label before camera-local overrides
-- `resolved_profile_label`: the actual authored label after zone blending on that camera
+- `base_profile_label`
+- `resolved_profile_label`
 
-This makes BRP inspection clearer when the global weather is calm but one camera is inside a storm pocket or shelter.
+and also exposes:
+
+- precipitation hints for local rendering backends
+- precipitation and screen occlusion multipliers
+- fog density / color / visibility
+- wetness factor
+- wind vector
+- lightning flash intensity
+
+`WeatherSurfaceState` is the per-surface accumulation record. It stays in the core crate so gameplay systems and render adapters can both read the same wetness / puddle / snow data.
+
+## Adapter Model
+
+### Visual Adapter
+
+`WeatherVisualsPlugin` consumes `WeatherCameraState` and publishes `WeatherCameraVisualState`.
+
+It owns:
+
+- `WeatherVisualsConfig`
+- `WeatherVisualDiagnostics`
+- precipitation emitter entities
+- screen overlay entities
+- `DistanceFog` synchronization
+
+The adapter computes a bundled screen response from the core weather state using `WeatherScreenFxSettings`. That keeps screen cues configurable without putting them back into `WeatherProfile`.
+
+### StandardMaterial Adapter
+
+`WeatherSurfaceMaterialsPlugin` consumes:
+
+- `WeatherSurfaceState`
+- `WeatherSurfaceStandardMaterial`
+- `MeshMaterial3d<StandardMaterial>`
+
+On first sync it clones the referenced `StandardMaterial` handle so weather response stays entity-local instead of mutating shared authored assets in place.
 
 ## Solver Split
 
-The crate keeps the core solver mostly pure Rust:
+Pure Rust logic stays isolated:
 
-- `profiles.rs`: presets, clamping, interpolation rules
+- `profiles.rs`: presets, clamping, interpolation
 - `solver.rs`: gust sampling, lightning scheduling, profile resolution, zone blending, occlusion blending
 
-The Bevy integration layer lives in:
+Bevy integration stays thin:
 
-- `systems.rs`: activation, transitions, runtime resolution, camera resolution, fog sync, diagnostics, message emission
-- `surfaces.rs`: opt-in `WeatherSurface` accumulation and `StandardMaterial` modulation
-- `visuals.rs`: precipitation emitter management and optional screen overlays
-
-The emitter presentation consumes `WeatherCameraState.wind_influence`, so authored precipitation wind response changes the actual visual drift instead of staying metadata-only.
-
-This split keeps the hard logic testable without a full `App`.
-
-## Surface Material Bridge
-
-`WeatherSurface` is intentionally opt-in and conservative:
-
-- it only targets entities using `MeshMaterial3d<StandardMaterial>`
-- on first sync, the crate clones the referenced material handle so the weathered copy becomes entity-local
-- weather is resolved at the surface entity's world position using the same zone/profile solver path used by cameras
-- the crate writes `WeatherSurfaceState` so downstream code can react to wetness, puddles, or snow accumulation without re-solving weather
-
-This keeps the default bridge useful for real scenes while avoiding hidden mutation of shared authoring materials.
+- `systems.rs`: activation, transitions, runtime resolution, camera resolution, diagnostics, messages
+- `surfaces.rs`: surface accumulation state only
+- `visuals.rs`: bundled camera-side rendering adapter
+- `surface_materials.rs`: bundled `StandardMaterial` adapter
 
 ## System Ordering
 
-The public `WeatherSystems` order is fixed and chained:
+Core ordering:
 
-1. `ApplyRequests`
-2. `AdvanceTransition`
-3. `ResolveBaseState`
-4. `SyncSurfaces`
-5. `ResolveCameraState`
-6. `SyncEmitters`
-7. `SyncFog`
-8. `SyncScreenEffects`
-9. `EmitMessages`
-10. `Diagnostics`
+1. `WeatherSystems::ApplyRequests`
+2. `WeatherSystems::AdvanceTransition`
+3. `WeatherSystems::ResolveBaseState`
+4. `WeatherSystems::SyncSurfaces`
+5. `WeatherSystems::ResolveCameraState`
+6. `WeatherSystems::EmitMessages`
+7. `WeatherSystems::Diagnostics`
 
-Implications:
+Bundled visual adapter ordering:
 
-- profile transition requests are consumed before the frame advances
-- global weather is resolved before any surface-local or camera-local weather state
-- authored surface materials are updated before downstream gameplay or diagnostics read `WeatherSurfaceState`
-- precipitation and fog consume camera-local state, not raw authored profiles
-- messages fire after runtime resolution, so downstream readers see the resolved state in the same frame
+1. `WeatherVisualSystems::ResolveState`
+2. `WeatherVisualSystems::SyncEmitters`
+3. `WeatherVisualSystems::SyncFog`
+4. `WeatherVisualSystems::SyncScreenEffects`
+5. `WeatherVisualSystems::Diagnostics`
+
+`WeatherVisualSystems::ResolveState` is ordered after `WeatherSystems::ResolveCameraState`, so the visual adapter always reads final local weather state.
+
+The material adapter runs in `WeatherSurfaceMaterialSystems::ApplyMaterials` after `WeatherSystems::SyncSurfaces`.
 
 ## Zone Blending Rules
 
-`WeatherZone` uses:
+`WeatherZone` resolution is deterministic:
 
-- `priority`: higher priority wins over lower priority when zones overlap
-- `weight`: relative blend strength within the winning priority band
-- `shape + blend_distance`: geometric influence falloff
-
-Resolution flow:
-
-1. Gather every zone affecting the camera position.
+1. Gather every zone affecting the sample position.
 2. Find the highest active priority.
-3. Blend only zones in that winning band, weighted by `weight * influence`.
+3. Blend only zones in that winning priority band, weighted by `weight * influence`.
 4. Blend the result against the base global profile.
 
-This keeps the result deterministic and avoids low-priority fog pockets diluting an intentional high-priority storm cell.
+This keeps low-priority ambience from diluting an intentional high-priority storm pocket.
 
-## Shelter / Occlusion Rules
+## Shelter Rules
 
 `WeatherOcclusionVolume` is evaluated per camera after zone resolution.
 
 - `precipitation_multiplier` attenuates precipitation presentation
-- `screen_fx_multiplier` attenuates screen-space cues
+- `screen_fx_multiplier` attenuates bundled screen cues
 - the strongest suppression wins as influence increases
 
-This is intentionally generic. The crate does not define “indoors” or “under a roof” semantically; it only resolves authored suppression volumes and camera-local blocking factors.
+The core crate still resolves both multipliers because they are weather-exposure signals. Only the actual fog, particle, and overlay rendering lives in the adapter.
 
 ## Precipitation Strategy
 
-The crate uses a production-style illusion:
+The bundled visual adapter uses a camera-local illusion:
 
-- precipitation is spawned in a local volume around each opted-in camera
-- particle transforms are deterministic from seed plus elapsed time
-- the emitter root tracks the active camera instead of simulating world-scale weather coverage
-- far-field “weather scale” is represented by fog, visibility, and density hints rather than infinitely large particle swarms
+- particles are spawned in a bounded volume near the active camera
+- transforms are deterministic from seed plus elapsed time
+- the emitter root follows the camera instead of simulating map-wide coverage
+- far-field weather scale is carried mostly by fog, visibility, and density hints
 
-This keeps the default implementation portable and cheap while preserving a backend-private public API.
+This keeps the bundled implementation cheap while leaving room for a future GPU or world-scale adapter.
 
-## Fog Strategy
+## Extensibility
 
-The crate does not replace Bevy fog. It drives per-camera `DistanceFog` for cameras with `WeatherCamera::apply_distance_fog = true`.
+The intended integration patterns are:
 
-This gives downstream apps a useful baseline that composes well with:
+- core only: use `WeatherPlugin` and consume `WeatherRuntime`, `WeatherCameraState`, and `WeatherSurfaceState`
+- core + visuals: add `WeatherVisualsPlugin`
+- core + material bridge: add `WeatherSurfaceMaterialsPlugin`
+- full bundled stack: add all three plugins
 
-- scene lighting
-- atmosphere systems
-- additional volumetric rendering from other crates
-
-## Screen-Effects Strategy
-
-The solver always resolves screen-space weather cues into `WeatherCameraState`:
-
-- overlay intensity and tint
-- droplets, frost, and streak strength
-- lightning flash intensity
-
-How that state is presented depends on `WeatherConfig::screen_fx_mode`:
-
-- `BuiltInOverlay`: the crate maintains lightweight overlay entities for opted-in cameras
-- `StateOnly`: overlay entities are skipped and existing overlays are cleaned up, leaving presentation to another screen-effects system
-
-This keeps weather usable both as a standalone crate and as a source of authored inputs for a broader atmosphere or post-processing stack.
-
-## Quality Model
-
-`WeatherQuality` currently controls:
-
-- max particles per camera
-- whether screen-space overlays are enabled
-- overlay texture resolution
-
-Why this model:
-
-- it gives a clear mobile / WASM / lower-end fallback path
-- it preserves the same authored profiles across quality tiers
-- it keeps the public API stable if a future GPU precipitation backend is added
-
-## Lightning Scope
-
-Lightning currently resolves as:
-
-- deterministic flash scheduling in the solver
-- `LightningFlashEmitted` messages
-- per-camera `lightning_flash_intensity`
-- an optional screen-space flash cue on cameras that allow screen effects
-
-This is intentionally smaller than a full sky-lightning system. Audio timing, cloud illumination, and bespoke scene-light modulation remain downstream responsibilities.
+That composition model is the key design change in this crate revision.

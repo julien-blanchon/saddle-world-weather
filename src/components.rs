@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::{PrecipitationKind, WeatherProfile};
+use crate::{PrecipitationKind, WeatherProfile, WeatherScreenState};
 
 #[derive(Component, Debug, Clone, PartialEq, Reflect)]
 #[reflect(Component)]
@@ -47,15 +47,13 @@ pub struct WeatherCameraState {
     pub near_height: f32,
     pub far_density: f32,
     pub occlusion_factor: f32,
-    pub screen_fx_factor: f32,
-    pub screen_tint: Color,
+    pub screen_occlusion_factor: f32,
     pub wetness_factor: f32,
     pub fog_density: f32,
     pub fog_color: Color,
     pub visibility_distance: f32,
     pub wind_vector: Vec3,
     pub lightning_flash_intensity: f32,
-    pub active_particles: usize,
 }
 
 impl Default for WeatherCameraState {
@@ -75,17 +73,22 @@ impl Default for WeatherCameraState {
             near_height: 10.0,
             far_density: 0.0,
             occlusion_factor: 1.0,
-            screen_fx_factor: 0.0,
-            screen_tint: Color::WHITE,
+            screen_occlusion_factor: 1.0,
             wetness_factor: 0.0,
             fog_density: 0.0,
             fog_color: Color::srgb(0.70, 0.74, 0.80),
             visibility_distance: 500.0,
             wind_vector: Vec3::ZERO,
             lightning_flash_intensity: 0.0,
-            active_particles: 0,
         }
     }
+}
+
+#[derive(Component, Debug, Clone, PartialEq, Reflect, Default)]
+#[reflect(Component)]
+pub struct WeatherCameraVisualState {
+    pub screen: WeatherScreenState,
+    pub active_particles: usize,
 }
 
 #[derive(Component, Debug, Clone, PartialEq, Reflect)]
@@ -104,15 +107,6 @@ pub struct WeatherSurface {
     pub puddle_threshold: f32,
     pub max_puddle_coverage: f32,
     pub max_snow_coverage: f32,
-    pub wet_roughness: f32,
-    pub puddle_roughness: f32,
-    pub snow_roughness: f32,
-    pub wet_reflectance: f32,
-    pub puddle_reflectance: f32,
-    pub snow_reflectance: f32,
-    pub wet_darkening: f32,
-    pub puddle_darkening: f32,
-    pub snow_tint: Color,
 }
 
 impl Default for WeatherSurface {
@@ -131,6 +125,29 @@ impl Default for WeatherSurface {
             puddle_threshold: 0.35,
             max_puddle_coverage: 0.7,
             max_snow_coverage: 1.0,
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, PartialEq, Reflect)]
+#[reflect(Component)]
+pub struct WeatherSurfaceStandardMaterial {
+    pub enabled: bool,
+    pub wet_roughness: f32,
+    pub puddle_roughness: f32,
+    pub snow_roughness: f32,
+    pub wet_reflectance: f32,
+    pub puddle_reflectance: f32,
+    pub snow_reflectance: f32,
+    pub wet_darkening: f32,
+    pub puddle_darkening: f32,
+    pub snow_tint: Color,
+}
+
+impl Default for WeatherSurfaceStandardMaterial {
+    fn default() -> Self {
+        Self {
+            enabled: true,
             wet_roughness: 0.18,
             puddle_roughness: 0.04,
             snow_roughness: 0.92,

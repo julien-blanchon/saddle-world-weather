@@ -1,61 +1,38 @@
-use bevy::{
-    color::LinearRgba,
-    pbr::{MeshMaterial3d, StandardMaterial},
-    prelude::*,
-};
+use bevy::prelude::*;
 
 use crate::{
     WeatherConfig, WeatherRuntime, WeatherSurface, WeatherSurfaceState, WeatherZone,
     resolve_runtime, resolve_zone_profile,
 };
 
-#[derive(Component, Debug, Clone)]
-pub(crate) struct WeatherSurfaceMaterialBinding {
-    pub material: Handle<StandardMaterial>,
-    pub base_color: Color,
-    pub perceptual_roughness: f32,
-    pub metallic: f32,
-    pub reflectance: f32,
-}
-
-pub(crate) fn sync_surface_materials(
+pub(crate) fn sync_surface_states(
     mut commands: Commands,
     time: Res<Time>,
     config: Res<WeatherConfig>,
     runtime: Res<WeatherRuntime>,
     internal: Res<crate::systems::WeatherInternalState>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     zones: Query<(&WeatherZone, &GlobalTransform)>,
     mut surfaces: Query<(
         Entity,
         &WeatherSurface,
         &GlobalTransform,
-        &mut MeshMaterial3d<StandardMaterial>,
         Option<&mut WeatherSurfaceState>,
-        Option<&WeatherSurfaceMaterialBinding>,
     )>,
 ) {
     let dt = time.delta_secs();
 
-    for (entity, surface, transform, mut material_slot, state, binding) in &mut surfaces {
+    for (entity, surface, transform, state) in &mut surfaces {
         if !surface.enabled {
+            if state.is_some() {
+                commands.entity(entity).remove::<WeatherSurfaceState>();
+            }
             continue;
         }
-
-        let Some(binding) = ensure_material_binding(
-            &mut commands,
-            &mut materials,
-            entity,
-            &mut material_slot,
-            binding,
-        ) else {
-            continue;
-        };
 
         let contributions =
             crate::systems::collect_zone_contributions(transform.translation(), &zones);
         let zone_result = resolve_zone_profile(&runtime.active_profile, &contributions);
-        let (_, precipitation, _, _, _, factors) = resolve_runtime(
+        let (_, precipitation, _, _, factors) = resolve_runtime(
             &zone_result.profile,
             config.seed,
             internal.elapsed_time_secs,
@@ -106,34 +83,6 @@ pub(crate) fn sync_surface_materials(
             ) * dt,
         );
 
-        let Some(material) = materials.get_mut(&binding.material) else {
-            continue;
-        };
-
-        let wet_mix = next_state.wetness.clamp(0.0, 1.0);
-        let puddle_mix = next_state.puddle_coverage.clamp(0.0, 1.0);
-        let snow_mix = next_state.snow_coverage.clamp(0.0, 1.0);
-
-        let darkening =
-            1.0 - surface.wet_darkening * wet_mix - surface.puddle_darkening * puddle_mix;
-        let damp_color = scale_color(binding.base_color, darkening.clamp(0.0, 1.0));
-        material.base_color = mix_color(damp_color, surface.snow_tint, snow_mix);
-        let roughness = lerp(
-            lerp(binding.perceptual_roughness, surface.wet_roughness, wet_mix),
-            surface.puddle_roughness,
-            puddle_mix,
-        );
-        material.perceptual_roughness =
-            lerp(roughness, surface.snow_roughness, snow_mix).clamp(0.0, 1.0);
-        let reflectance = lerp(
-            lerp(binding.reflectance, surface.wet_reflectance, wet_mix),
-            surface.puddle_reflectance,
-            puddle_mix,
-        );
-        material.reflectance =
-            lerp(reflectance, surface.snow_reflectance, snow_mix).clamp(0.0, 1.0);
-        material.metallic = binding.metallic;
-
         if let Some(mut state) = state {
             *state = next_state;
         } else {
@@ -142,60 +91,13 @@ pub(crate) fn sync_surface_materials(
     }
 }
 
-pub(crate) fn reset_surface_materials(
+pub(crate) fn reset_surface_states(
     mut commands: Commands,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut surfaces: Query<(
-        Entity,
-        &WeatherSurfaceMaterialBinding,
-        &MeshMaterial3d<StandardMaterial>,
-        Option<&WeatherSurfaceState>,
-    )>,
+    surfaces: Query<(Entity, &WeatherSurfaceState)>,
 ) {
-    for (entity, binding, material_slot, state) in &mut surfaces {
-        if let Some(material) = materials.get_mut(&material_slot.0) {
-            material.base_color = binding.base_color;
-            material.perceptual_roughness = binding.perceptual_roughness;
-            material.metallic = binding.metallic;
-            material.reflectance = binding.reflectance;
-        }
-
-        commands
-            .entity(entity)
-            .remove::<WeatherSurfaceMaterialBinding>();
-        if state.is_some() {
-            commands.entity(entity).remove::<WeatherSurfaceState>();
-        }
+    for (entity, _) in &surfaces {
+        commands.entity(entity).remove::<WeatherSurfaceState>();
     }
-}
-
-fn ensure_material_binding(
-    commands: &mut Commands,
-    materials: &mut Assets<StandardMaterial>,
-    entity: Entity,
-    material_slot: &mut MeshMaterial3d<StandardMaterial>,
-    existing: Option<&WeatherSurfaceMaterialBinding>,
-) -> Option<WeatherSurfaceMaterialBinding> {
-    if let Some(existing) = existing {
-        if material_slot.0 == existing.material && materials.get(&existing.material).is_some() {
-            return Some(existing.clone());
-        }
-    }
-
-    let source = material_slot.0.clone();
-    let material = materials.get(&source)?.clone();
-    let unique = materials.add(material.clone());
-    *material_slot = MeshMaterial3d(unique.clone());
-
-    let binding = WeatherSurfaceMaterialBinding {
-        material: unique,
-        base_color: material.base_color,
-        perceptual_roughness: material.perceptual_roughness,
-        metallic: material.metallic,
-        reflectance: material.reflectance,
-    };
-    commands.entity(entity).insert(binding.clone());
-    Some(binding)
 }
 
 fn puddle_target(surface: &WeatherSurface, rain_factor: f32) -> f32 {
@@ -227,33 +129,6 @@ fn approach(current: f32, target: f32, delta: f32) -> f32 {
     } else {
         current + difference.signum() * delta
     }
-}
-
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
-}
-
-fn scale_color(color: Color, factor: f32) -> Color {
-    let linear = color.to_linear();
-    Color::linear_rgba(
-        linear.red * factor,
-        linear.green * factor,
-        linear.blue * factor,
-        linear.alpha,
-    )
-}
-
-fn mix_color(a: Color, b: Color, t: f32) -> Color {
-    let t = t.clamp(0.0, 1.0);
-    let a = a.to_linear();
-    let b = b.to_linear();
-    let mixed = LinearRgba {
-        red: lerp(a.red, b.red, t),
-        green: lerp(a.green, b.green, t),
-        blue: lerp(a.blue, b.blue, t),
-        alpha: lerp(a.alpha, b.alpha, t),
-    };
-    Color::linear_rgba(mixed.red, mixed.green, mixed.blue, mixed.alpha)
 }
 
 #[cfg(test)]

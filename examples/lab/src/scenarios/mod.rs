@@ -2,7 +2,7 @@ mod support;
 
 use bevy::prelude::*;
 use saddle_bevy_e2e::{action::Action, scenario::Scenario};
-use saddle_world_weather::{WeatherConfig, WeatherProfile, WeatherQuality};
+use saddle_world_weather::{WeatherConfig, WeatherProfile, WeatherQuality, WeatherVisualsConfig};
 
 pub fn list_scenarios() -> Vec<&'static str> {
     vec![
@@ -40,8 +40,9 @@ fn weather_smoke() -> Scenario {
             );
             let runtime = support::runtime(world);
             let diagnostics = support::diagnostics(world);
+            let visual_diagnostics = support::visual_diagnostics(world);
             assert_eq!(runtime.active_profile.label.as_deref(), Some("Clear"));
-            assert_eq!(diagnostics.quality, WeatherQuality::High);
+            assert_eq!(visual_diagnostics.quality, WeatherQuality::High);
             assert_eq!(diagnostics.current_precipitation_kind, saddle_world_weather::PrecipitationKind::None);
             assert_eq!(diagnostics.transition_started_count, 0);
             let overlay = support::overlay_text(world).expect("overlay text should exist");
@@ -98,9 +99,9 @@ fn weather_transition_gallery() -> Scenario {
         })
         .then(Action::Custom(Box::new(|world| {
             let runtime = support::runtime(world);
-            let diagnostics = support::diagnostics(world);
+            let visual_diagnostics = support::visual_diagnostics(world);
             assert!(runtime.factors.rain_factor > 0.5);
-            assert!(diagnostics.precipitation_particles_estimate > 0);
+            assert!(visual_diagnostics.precipitation_particles_estimate > 0);
         })))
         .then(Action::Screenshot("rain".into()))
         .then(Action::Custom(Box::new(|world| {
@@ -161,8 +162,10 @@ fn weather_shelter_occlusion() -> Scenario {
         .then(Action::WaitFrames(15))
         .then(Action::Custom(Box::new(|world| {
             let camera = support::camera_state(world);
+            let visual_state = support::camera_visual_state(world)
+                .expect("camera visual state should exist outside the shelter");
             assert!(camera.precipitation_factor > 0.2);
-            assert!(camera.screen_fx_factor > 0.08);
+            assert!(visual_state.screen.overlay_intensity > 0.08);
         })))
         .then(Action::Screenshot("shelter_open".into()))
         .then(Action::Custom(Box::new(|world| {
@@ -171,9 +174,11 @@ fn weather_shelter_occlusion() -> Scenario {
         .then(Action::WaitFrames(15))
         .then(Action::Custom(Box::new(|world| {
             let camera = support::camera_state(world);
+            let visual_state = support::camera_visual_state(world)
+                .expect("camera visual state should exist under the shelter");
             assert!(camera.occlusion_factor < 0.2);
             assert!(camera.precipitation_factor < 0.12);
-            assert!(camera.screen_fx_factor < 0.12);
+            assert!(visual_state.screen.overlay_intensity < 0.12);
         })))
         .then(Action::Screenshot("shelter_under_roof".into()))
         .build()
@@ -218,12 +223,12 @@ fn weather_quality_compare() -> Scenario {
             world
                 .resource_mut::<WeatherConfig>()
                 .queue_immediate(WeatherProfile::storm());
-            world.resource_mut::<WeatherConfig>().quality = WeatherQuality::Low;
+            world.resource_mut::<WeatherVisualsConfig>().quality = WeatherQuality::Low;
             *world.resource_mut::<crate::QualitySnapshot>() = crate::QualitySnapshot::default();
         })))
         .then(Action::WaitFrames(12))
         .then(Action::Custom(Box::new(|world| {
-            let diagnostics = support::diagnostics(world);
+            let diagnostics = support::visual_diagnostics(world);
             world.resource_mut::<crate::QualitySnapshot>().low_particles =
                 diagnostics.precipitation_particles_estimate;
             assert_eq!(diagnostics.quality, WeatherQuality::Low);
@@ -232,11 +237,11 @@ fn weather_quality_compare() -> Scenario {
         })))
         .then(Action::Screenshot("quality_low".into()))
         .then(Action::Custom(Box::new(|world| {
-            world.resource_mut::<WeatherConfig>().quality = WeatherQuality::High;
+            world.resource_mut::<WeatherVisualsConfig>().quality = WeatherQuality::High;
         })))
         .then(Action::WaitFrames(20))
         .then(Action::Custom(Box::new(|world| {
-            let diagnostics = support::diagnostics(world);
+            let diagnostics = support::visual_diagnostics(world);
             world.resource_mut::<crate::QualitySnapshot>().high_particles =
                 diagnostics.precipitation_particles_estimate;
             let snapshot = *world.resource::<crate::QualitySnapshot>();

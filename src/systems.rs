@@ -1,7 +1,4 @@
-use bevy::{
-    pbr::{DistanceFog, FogFalloff},
-    prelude::*,
-};
+use bevy::prelude::*;
 
 use crate::{
     LightningFlashEmitted, WeatherCamera, WeatherCameraState, WeatherConfig, WeatherDiagnostics,
@@ -36,8 +33,8 @@ impl Default for WeatherInternalState {
     }
 }
 
-pub(crate) fn runtime_is_active(state: Res<WeatherInternalState>) -> bool {
-    state.active
+pub(crate) fn runtime_is_active(state: Option<Res<WeatherInternalState>>) -> bool {
+    state.is_some_and(|state| state.active)
 }
 
 pub(crate) fn activate_runtime(
@@ -63,11 +60,8 @@ pub(crate) fn activate_runtime(
 
     diagnostics.active_profile_label = runtime.active_profile.label.clone();
     diagnostics.target_profile_label = runtime.target_profile.label.clone();
-    diagnostics.quality = config.quality;
     diagnostics.transition_progress = runtime.transition.progress;
     diagnostics.transition_active = runtime.transition.active;
-    diagnostics.active_emitters = 0;
-    diagnostics.precipitation_particles_estimate = 0;
     diagnostics.active_zone_count = 0;
     diagnostics.current_wind = runtime.wind.vector;
     diagnostics.current_fog_density = runtime.visibility.fog_density;
@@ -75,7 +69,6 @@ pub(crate) fn activate_runtime(
     diagnostics.current_precipitation_kind = runtime.precipitation.kind.clone();
     diagnostics.primary_camera_name = None;
     diagnostics.primary_zone_label = None;
-    diagnostics.managed_screen_overlays = 0;
     diagnostics.last_transition_started_at = None;
     diagnostics.last_transition_finished_at = None;
     diagnostics.last_lightning_flash_id = runtime.storm.lightning_flash_id;
@@ -91,18 +84,8 @@ pub(crate) fn deactivate_runtime(mut internal: ResMut<WeatherInternalState>) {
 
 pub(crate) fn cleanup_runtime(
     mut commands: Commands,
-    emitters: Query<Entity, With<crate::visuals::WeatherEmitterRoot>>,
-    overlays: Query<Entity, With<crate::visuals::WeatherScreenOverlay>>,
     camera_states: Query<Entity, With<WeatherCameraState>>,
 ) {
-    for entity in &emitters {
-        commands.entity(entity).despawn_related::<Children>();
-        commands.entity(entity).despawn();
-    }
-    for entity in &overlays {
-        commands.entity(entity).despawn_related::<Children>();
-        commands.entity(entity).despawn();
-    }
     for entity in &camera_states {
         commands.entity(entity).remove::<WeatherCameraState>();
     }
@@ -267,7 +250,7 @@ pub(crate) fn resolve_camera_states(
         let camera_position = global_transform.translation();
         let zone_contributions = collect_zone_contributions(camera_position, &zones);
         let zone_result = resolve_zone_profile(&runtime.active_profile, &zone_contributions);
-        let (wind, precipitation, visibility, screen_fx, storm, factors) = resolve_runtime(
+        let (wind, precipitation, visibility, storm, factors) = resolve_runtime(
             &zone_result.profile,
             config.seed,
             internal.elapsed_time_secs,
@@ -286,15 +269,6 @@ pub(crate) fn resolve_camera_states(
             0.0
         };
 
-        let screen_fx_factor =
-            if weather_camera.receive_screen_fx && config.quality.plan().enable_screen_fx {
-                screen_fx.overlay_intensity
-                    * occlusion_result.screen_fx_multiplier
-                    * (1.0 - weather_camera.precipitation_blocked_factor * 0.8).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-
         let state = WeatherCameraState {
             base_profile_label: runtime.active_profile.label.clone(),
             resolved_profile_label: zone_result.profile.label.clone(),
@@ -310,15 +284,13 @@ pub(crate) fn resolve_camera_states(
             near_height: precipitation.near_height,
             far_density: precipitation.far_density,
             occlusion_factor: occlusion_result.precipitation_multiplier,
-            screen_fx_factor,
-            screen_tint: screen_fx.tint,
+            screen_occlusion_factor: occlusion_result.screen_fx_multiplier,
             wetness_factor: factors.wetness_factor,
             fog_density: visibility.fog_density,
             fog_color: visibility.fog_color,
             visibility_distance: visibility.visibility_distance,
             wind_vector: wind.vector,
             lightning_flash_intensity: storm.lightning_flash_intensity,
-            active_particles: existing_state.map_or(0, |state| state.active_particles),
         };
 
         commands.entity(entity).insert(state);
@@ -334,35 +306,6 @@ pub(crate) fn resolve_camera_states(
     diagnostics.primary_camera_name = primary_camera_name;
     diagnostics.primary_zone_label = primary_zone_label;
     diagnostics.active_zone_count = primary_zone_count;
-}
-
-pub(crate) fn sync_distance_fog(
-    mut commands: Commands,
-    mut cameras: Query<
-        (
-            Entity,
-            &WeatherCamera,
-            &WeatherCameraState,
-            Option<&mut DistanceFog>,
-        ),
-        With<Camera>,
-    >,
-) {
-    for (entity, weather_camera, state, distance_fog) in &mut cameras {
-        if !weather_camera.enabled || !weather_camera.apply_distance_fog {
-            continue;
-        }
-
-        let desired = default_distance_fog(state);
-        if let Some(mut fog) = distance_fog {
-            fog.color = desired.color;
-            fog.directional_light_color = desired.directional_light_color;
-            fog.directional_light_exponent = desired.directional_light_exponent;
-            fog.falloff = desired.falloff;
-        } else if weather_camera.insert_missing_components {
-            commands.entity(entity).insert(desired);
-        }
-    }
 }
 
 pub(crate) fn emit_pending_messages(
@@ -392,45 +335,25 @@ pub(crate) fn emit_pending_messages(
 }
 
 pub(crate) fn publish_diagnostics(
-    config: Res<WeatherConfig>,
     runtime: Res<WeatherRuntime>,
     mut diagnostics: ResMut<WeatherDiagnostics>,
-    camera_states: Query<&WeatherCameraState>,
-    emitters: Query<(), With<crate::visuals::WeatherEmitterRoot>>,
-    overlays: Query<(), With<crate::visuals::WeatherScreenOverlay>>,
 ) {
     diagnostics.active_profile_label = runtime.active_profile.label.clone();
     diagnostics.target_profile_label = runtime.target_profile.label.clone();
-    diagnostics.quality = config.quality;
     diagnostics.transition_progress = runtime.transition.progress;
     diagnostics.transition_active = runtime.transition.active;
     diagnostics.current_wind = runtime.wind.vector;
     diagnostics.current_fog_density = runtime.visibility.fog_density;
     diagnostics.current_visibility_distance = runtime.visibility.visibility_distance;
     diagnostics.current_precipitation_kind = runtime.precipitation.kind.clone();
-
-    if !config.diagnostics_enabled {
-        diagnostics.active_emitters = 0;
-        diagnostics.managed_screen_overlays = 0;
-        diagnostics.precipitation_particles_estimate = 0;
-        return;
-    }
-
-    diagnostics.active_emitters = emitters.iter().count();
-    diagnostics.managed_screen_overlays = overlays.iter().count();
-    diagnostics.precipitation_particles_estimate = camera_states
-        .iter()
-        .map(|state| state.active_particles)
-        .sum();
 }
 
 fn apply_resolved_runtime(runtime: &mut WeatherRuntime, config: &WeatherConfig, time_secs: f32) {
-    let (wind, precipitation, visibility, screen_fx, storm, factors) =
+    let (wind, precipitation, visibility, storm, factors) =
         resolve_runtime(&runtime.active_profile, config.seed, time_secs);
     runtime.wind = wind;
     runtime.precipitation = precipitation;
     runtime.visibility = visibility;
-    runtime.screen_fx = screen_fx;
     runtime.storm = storm;
     runtime.factors = factors;
 }
@@ -443,21 +366,6 @@ fn default_transition_state(profile: &WeatherProfile) -> crate::WeatherTransitio
         progress: 1.0,
         source_label: profile.label.clone(),
         target_label: profile.label.clone(),
-    }
-}
-
-fn default_distance_fog(state: &WeatherCameraState) -> DistanceFog {
-    DistanceFog {
-        color: state.fog_color,
-        directional_light_color: state
-            .fog_color
-            .with_alpha((0.12 + state.precipitation_factor * 0.36).clamp(0.0, 1.0)),
-        directional_light_exponent: 18.0,
-        falloff: FogFalloff::from_visibility_colors(
-            state.visibility_distance,
-            state.fog_color.with_alpha(1.0),
-            state.fog_color.with_alpha(1.0),
-        ),
     }
 }
 

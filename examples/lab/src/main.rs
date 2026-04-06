@@ -6,10 +6,12 @@ use saddle_world_weather_example_support as support;
 
 use bevy::prelude::*;
 use saddle_world_weather::{
-    LightningFlashEmitted, WeatherCameraState, WeatherConfig, WeatherDiagnostics,
-    WeatherOcclusionVolume, WeatherPlugin, WeatherProfile, WeatherProfileChanged, WeatherQuality,
-    WeatherRuntime, WeatherScreenFxMode, WeatherSystems, WeatherTransitionFinished,
-    WeatherTransitionStarted, WeatherVolumeShape, WeatherZone,
+    LightningFlashEmitted, WeatherCameraState, WeatherCameraVisualState, WeatherConfig,
+    WeatherDiagnostics, WeatherOcclusionVolume, WeatherPlugin, WeatherProfile,
+    WeatherProfileChanged, WeatherQuality, WeatherRuntime, WeatherScreenFxMode,
+    WeatherSurfaceMaterialsPlugin, WeatherSystems, WeatherTransitionFinished,
+    WeatherTransitionStarted, WeatherVisualDiagnostics, WeatherVisualsConfig,
+    WeatherVisualsPlugin, WeatherVolumeShape, WeatherZone,
 };
 
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
@@ -50,8 +52,13 @@ fn main() {
     #[cfg(feature = "e2e")]
     app.add_plugins(e2e::E2EPlugin);
     let config = lab_config();
-    support::install_demo_pane(&mut app, &config);
-    app.add_plugins(WeatherPlugin::default().with_config(config));
+    let visuals = lab_visuals_config();
+    support::install_demo_pane(&mut app, &config, &visuals);
+    app.add_plugins((
+        WeatherPlugin::default().with_config(config),
+        WeatherVisualsPlugin::default().with_config(visuals),
+        WeatherSurfaceMaterialsPlugin::default(),
+    ));
     app.add_systems(Startup, setup);
     app.add_systems(
         Update,
@@ -59,6 +66,8 @@ fn main() {
             support::animate_props,
             update_lab_overlay.after(WeatherSystems::Diagnostics),
             count_messages.after(WeatherSystems::EmitMessages),
+            #[cfg(feature = "e2e")]
+            exit_after_e2e_completion.after(saddle_bevy_e2e::E2ESet),
         ),
     );
     app.run();
@@ -67,12 +76,18 @@ fn main() {
 fn lab_config() -> WeatherConfig {
     WeatherConfig {
         initial_profile: WeatherProfile::clear(),
-        quality: WeatherQuality::High,
         seed: 21,
         default_transition_duration_secs: 1.5,
         diagnostics_enabled: true,
-        screen_fx_mode: WeatherScreenFxMode::BuiltInOverlay,
         pending_request: None,
+    }
+}
+
+fn lab_visuals_config() -> WeatherVisualsConfig {
+    WeatherVisualsConfig {
+        quality: WeatherQuality::High,
+        screen_fx_mode: WeatherScreenFxMode::BuiltInOverlay,
+        ..default()
     }
 }
 
@@ -213,8 +228,12 @@ fn count_messages(
 fn update_lab_overlay(
     runtime: Res<WeatherRuntime>,
     diagnostics: Res<WeatherDiagnostics>,
+    visual_diagnostics: Res<WeatherVisualDiagnostics>,
     log: Res<WeatherMessageLog>,
-    primary_camera: Query<&WeatherCameraState, With<support::PrimaryShowcaseCamera>>,
+    primary_camera: Query<
+        (&WeatherCameraState, Option<&WeatherCameraVisualState>),
+        With<support::PrimaryShowcaseCamera>,
+    >,
     mut overlay: Query<&mut Text, With<support::ShowcaseOverlay>>,
 ) {
     let Ok(mut text) = overlay.single_mut() else {
@@ -223,7 +242,7 @@ fn update_lab_overlay(
 
     let camera_line = primary_camera
         .single()
-        .map(|camera| {
+        .map(|(camera, visuals)| {
             format!(
                 "Camera base {}  resolved {}  zone {}\nPrecip {:?} {:>4.2}  screen {:>4.2}\nFog {:>4.2}  visibility {:>6.1}  far {:>4.2}\nWind [{:>5.2}, {:>5.2}, {:>5.2}] x {:>4.2}  particles {}\nWetness {:>4.2}  flash {:>4.2}",
                 camera.base_profile_label.as_deref().unwrap_or("Unnamed"),
@@ -231,7 +250,9 @@ fn update_lab_overlay(
                 camera.zone_label.as_deref().unwrap_or("Global"),
                 camera.precipitation_kind,
                 camera.precipitation_factor,
-                camera.screen_fx_factor,
+                visuals
+                    .map(|state| state.screen.overlay_intensity)
+                    .unwrap_or_default(),
                 camera.fog_density,
                 camera.visibility_distance,
                 camera.far_density,
@@ -239,7 +260,7 @@ fn update_lab_overlay(
                 camera.wind_vector.y,
                 camera.wind_vector.z,
                 camera.wind_influence,
-                camera.active_particles,
+                visuals.map(|state| state.active_particles).unwrap_or(0),
                 camera.wetness_factor,
                 camera.lightning_flash_intensity,
             )
@@ -257,12 +278,12 @@ fn update_lab_overlay(
         runtime.factors.snow_factor,
         runtime.factors.fog_factor,
         runtime.factors.wetness_factor,
-        diagnostics.quality,
+        visual_diagnostics.quality,
         diagnostics.current_fog_density,
         diagnostics.current_precipitation_kind,
-        diagnostics.active_emitters,
-        diagnostics.precipitation_particles_estimate,
-        diagnostics.managed_screen_overlays,
+        visual_diagnostics.active_emitters,
+        visual_diagnostics.precipitation_particles_estimate,
+        visual_diagnostics.managed_screen_overlays,
         diagnostics.transition_started_count,
         diagnostics.transition_finished_count,
         diagnostics.profile_changed_count,
@@ -281,4 +302,31 @@ fn update_lab_overlay(
             .unwrap_or("Global"),
         camera_line,
     );
+}
+
+#[cfg(feature = "e2e")]
+fn exit_after_e2e_completion(
+    runner: Option<Res<saddle_bevy_e2e::runner::ScenarioRunner>>,
+    capture: Option<Res<saddle_bevy_e2e::capture::CaptureState>>,
+    mut finished_frames: Local<u32>,
+) {
+    let Some(runner) = runner else {
+        *finished_frames = 0;
+        return;
+    };
+
+    if runner.handoff || !runner.finished {
+        *finished_frames = 0;
+        return;
+    }
+
+    if capture.as_ref().is_some_and(|capture| capture.pending_stitch) {
+        *finished_frames = 0;
+        return;
+    }
+
+    *finished_frames += 1;
+    if *finished_frames >= 60 {
+        std::process::exit(0);
+    }
 }

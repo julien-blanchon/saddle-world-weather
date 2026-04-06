@@ -6,13 +6,15 @@ use bevy::{
     color::palettes::css,
     light::{NotShadowCaster, NotShadowReceiver},
     math::primitives::{Cuboid, Rectangle},
+    pbr::{DistanceFog, FogFalloff},
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 
 use crate::{
-    PrecipitationKind, WeatherCamera, WeatherCameraState, WeatherConfig, WeatherQuality,
-    WeatherScreenFxMode, profiles::WeatherQualityPlan, solver::hash01,
+    PrecipitationKind, WeatherCamera, WeatherCameraState, WeatherCameraVisualState, WeatherConfig,
+    WeatherQuality, WeatherScreenFxMode, WeatherScreenFxSettings, WeatherScreenState,
+    WeatherVisualDiagnostics, WeatherVisualsConfig, profiles::WeatherQualityPlan, solver::hash01,
 };
 
 #[derive(Resource, Default)]
@@ -45,27 +47,95 @@ pub(crate) struct WeatherScreenOverlay {
     pub material: Handle<StandardMaterial>,
 }
 
-fn overlay_alpha(state: &WeatherCameraState) -> f32 {
-    (state.screen_fx_factor + state.lightning_flash_intensity * 0.35).clamp(0.0, 1.0)
+pub(crate) fn activate_visuals(
+    config: Res<WeatherVisualsConfig>,
+    mut diagnostics: ResMut<WeatherVisualDiagnostics>,
+) {
+    diagnostics.quality = config.quality;
+    diagnostics.active_emitters = 0;
+    diagnostics.precipitation_particles_estimate = 0;
+    diagnostics.managed_screen_overlays = 0;
 }
 
-fn overlay_emissive(state: &WeatherCameraState) -> LinearRgba {
-    LinearRgba::WHITE * (state.lightning_flash_intensity * 0.55).clamp(0.0, 1.0)
+pub(crate) fn cleanup_visuals(
+    mut commands: Commands,
+    emitters: Query<Entity, With<WeatherEmitterRoot>>,
+    overlays: Query<Entity, With<WeatherScreenOverlay>>,
+    visual_states: Query<Entity, With<WeatherCameraVisualState>>,
+) {
+    for entity in &emitters {
+        commands.entity(entity).despawn_related::<Children>();
+        commands.entity(entity).despawn();
+    }
+    for entity in &overlays {
+        commands.entity(entity).despawn();
+    }
+    for entity in &visual_states {
+        commands.entity(entity).remove::<WeatherCameraVisualState>();
+    }
+}
+
+pub(crate) fn resolve_camera_visual_states(
+    mut commands: Commands,
+    config: Res<WeatherVisualsConfig>,
+    mut cameras: Query<
+        (
+            Entity,
+            &WeatherCamera,
+            Option<&WeatherCameraState>,
+            Option<&WeatherCameraVisualState>,
+        ),
+        With<Camera>,
+    >,
+) {
+    for (entity, weather_camera, camera_state, existing_state) in &mut cameras {
+        let Some(camera_state) = camera_state else {
+            if existing_state.is_some() {
+                commands.entity(entity).remove::<WeatherCameraVisualState>();
+            }
+            continue;
+        };
+
+        if !weather_camera.enabled {
+            if existing_state.is_some() {
+                commands.entity(entity).remove::<WeatherCameraVisualState>();
+            }
+            continue;
+        }
+
+        let active_particles = if weather_camera.receive_precipitation {
+            desired_particle_count(config.quality, weather_camera, camera_state)
+        } else {
+            0
+        };
+
+        let screen = if weather_camera.receive_screen_fx && config.quality.plan().enable_screen_fx {
+            resolve_screen_fx(&config.screen_fx, camera_state)
+        } else {
+            WeatherScreenState::default()
+        };
+
+        commands.entity(entity).insert(WeatherCameraVisualState {
+            screen,
+            active_particles,
+        });
+    }
 }
 
 pub(crate) fn sync_precipitation_emitters(
     mut commands: Commands,
-    config: Res<WeatherConfig>,
+    config: Res<WeatherVisualsConfig>,
     internal: Res<crate::systems::WeatherInternalState>,
     mut visual_assets: ResMut<WeatherVisualAssets>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    mut cameras: Query<
+    cameras: Query<
         (
             Entity,
             &WeatherCamera,
-            &mut WeatherCameraState,
+            &WeatherCameraState,
+            &WeatherCameraVisualState,
             &GlobalTransform,
         ),
         With<Camera>,
@@ -79,7 +149,7 @@ pub(crate) fn sync_precipitation_emitters(
 ) {
     ensure_visual_assets(
         config.quality.plan(),
-        config.seed,
+        0,
         visual_assets.as_mut(),
         meshes.as_mut(),
         materials.as_mut(),
@@ -106,19 +176,16 @@ pub(crate) fn sync_precipitation_emitters(
 
     let mut desired_emitters = HashSet::new();
 
-    for (camera_entity, weather_camera, mut state, global_transform) in &mut cameras {
+    for (camera_entity, weather_camera, state, visual_state, global_transform) in &cameras {
         if !weather_camera.enabled || !weather_camera.receive_precipitation {
-            state.active_particles = 0;
             continue;
         }
 
-        let desired_count = desired_particle_count(config.quality, weather_camera, &state);
+        let desired_count = visual_state.active_particles;
         if desired_count == 0 || matches!(state.precipitation_kind, PrecipitationKind::None) {
-            state.active_particles = 0;
             continue;
         }
 
-        state.active_particles = desired_count;
         desired_emitters.insert(camera_entity);
 
         let (root_entity, current_kind, current_count, children) =
@@ -154,8 +221,8 @@ pub(crate) fn sync_precipitation_emitters(
                 &mut commands,
                 &visual_assets,
                 root_entity,
-                &state,
-                config.seed ^ camera_entity.to_bits(),
+                state,
+                camera_entity.to_bits(),
                 desired_count,
                 internal.elapsed_time_secs,
             );
@@ -164,7 +231,7 @@ pub(crate) fn sync_precipitation_emitters(
                 if let Ok((particle, mut transform)) = particles.get_mut(child) {
                     *transform = particle_transform(
                         particle,
-                        &state,
+                        state,
                         state.precipitation_kind.clone(),
                         internal.elapsed_time_secs,
                     );
@@ -185,19 +252,56 @@ pub(crate) fn sync_precipitation_emitters(
     }
 }
 
+pub(crate) fn sync_distance_fog(
+    mut commands: Commands,
+    mut cameras: Query<
+        (
+            Entity,
+            &WeatherCamera,
+            &WeatherCameraState,
+            Option<&mut DistanceFog>,
+        ),
+        With<Camera>,
+    >,
+) {
+    for (entity, weather_camera, state, distance_fog) in &mut cameras {
+        if !weather_camera.enabled || !weather_camera.apply_distance_fog {
+            continue;
+        }
+
+        let desired = default_distance_fog(state);
+        if let Some(mut fog) = distance_fog {
+            fog.color = desired.color;
+            fog.directional_light_color = desired.directional_light_color;
+            fog.directional_light_exponent = desired.directional_light_exponent;
+            fog.falloff = desired.falloff;
+        } else if weather_camera.insert_missing_components {
+            commands.entity(entity).insert(desired);
+        }
+    }
+}
+
 pub(crate) fn sync_screen_effect_overlays(
     mut commands: Commands,
-    config: Res<WeatherConfig>,
+    config: Res<WeatherVisualsConfig>,
     mut visual_assets: ResMut<WeatherVisualAssets>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    cameras: Query<(Entity, &WeatherCamera, &WeatherCameraState), With<Camera>>,
+    cameras: Query<
+        (
+            Entity,
+            &WeatherCamera,
+            &WeatherCameraState,
+            &WeatherCameraVisualState,
+        ),
+        With<Camera>,
+    >,
     overlays: Query<(Entity, &WeatherScreenOverlay)>,
 ) {
     ensure_visual_assets(
         config.quality.plan(),
-        config.seed,
+        0,
         visual_assets.as_mut(),
         meshes.as_mut(),
         materials.as_mut(),
@@ -217,11 +321,12 @@ pub(crate) fn sync_screen_effect_overlays(
     }
 
     let mut desired_overlays = HashSet::new();
-    for (camera_entity, weather_camera, state) in &cameras {
+    for (camera_entity, weather_camera, state, visual_state) in &cameras {
+        let overlay_alpha = overlay_alpha(visual_state, state);
         let should_show = weather_camera.enabled
             && weather_camera.receive_screen_fx
             && config.quality.plan().enable_screen_fx
-            && state.screen_fx_factor > 0.01;
+            && overlay_alpha > 0.01;
         if !should_show {
             continue;
         }
@@ -229,14 +334,14 @@ pub(crate) fn sync_screen_effect_overlays(
         desired_overlays.insert(camera_entity);
         if let Some((_, handle)) = existing_overlays.get(&camera_entity) {
             if let Some(material) = materials.get_mut(handle) {
-                material.base_color = state.screen_tint.with_alpha(overlay_alpha(state));
+                material.base_color = visual_state.screen.tint.with_alpha(overlay_alpha);
                 material.emissive = overlay_emissive(state);
             }
             continue;
         }
 
         let material = materials.add(StandardMaterial {
-            base_color: state.screen_tint.with_alpha(overlay_alpha(state)),
+            base_color: visual_state.screen.tint.with_alpha(overlay_alpha),
             base_color_texture: Some(visual_assets.overlay_texture.clone()),
             emissive: overlay_emissive(state),
             alpha_mode: AlphaMode::Blend,
@@ -268,6 +373,125 @@ pub(crate) fn sync_screen_effect_overlays(
             commands.entity(entity).despawn();
         }
     }
+}
+
+pub(crate) fn publish_visual_diagnostics(
+    config: Res<WeatherConfig>,
+    visuals_config: Res<WeatherVisualsConfig>,
+    mut diagnostics: ResMut<WeatherVisualDiagnostics>,
+    camera_states: Query<&WeatherCameraVisualState>,
+    emitters: Query<(), With<WeatherEmitterRoot>>,
+    overlays: Query<(), With<WeatherScreenOverlay>>,
+) {
+    diagnostics.quality = visuals_config.quality;
+
+    if !config.diagnostics_enabled {
+        diagnostics.active_emitters = 0;
+        diagnostics.managed_screen_overlays = 0;
+        diagnostics.precipitation_particles_estimate = 0;
+        return;
+    }
+
+    diagnostics.active_emitters = emitters.iter().count();
+    diagnostics.managed_screen_overlays = overlays.iter().count();
+    diagnostics.precipitation_particles_estimate = camera_states
+        .iter()
+        .map(|state| state.active_particles)
+        .sum();
+}
+
+fn resolve_screen_fx(
+    settings: &WeatherScreenFxSettings,
+    state: &WeatherCameraState,
+) -> WeatherScreenState {
+    let rain = if matches!(state.precipitation_kind, PrecipitationKind::Rain) {
+        state.precipitation_factor
+    } else {
+        0.0
+    };
+    let snow = if matches!(state.precipitation_kind, PrecipitationKind::Snow) {
+        state.precipitation_factor
+    } else {
+        0.0
+    };
+    let fog = state.fog_density.clamp(0.0, 1.0);
+    let storm = state
+        .lightning_flash_intensity
+        .max(state.wetness_factor * 0.35);
+    let occlusion = state.screen_occlusion_factor.clamp(0.0, 1.0);
+
+    let overlay_intensity = (settings.base_intensity
+        + rain * settings.rain_intensity
+        + snow * settings.snow_intensity
+        + fog * settings.fog_intensity
+        + storm * settings.storm_intensity)
+        .clamp(0.0, 1.0)
+        * occlusion;
+
+    let tint = blend_screen_tint(settings, rain, snow, fog, storm);
+
+    WeatherScreenState {
+        overlay_intensity,
+        droplet_intensity: (rain * settings.droplet_intensity * occlusion).clamp(0.0, 1.0),
+        frost_intensity: (snow * settings.frost_intensity * (0.35 + fog * 0.65) * occlusion)
+            .clamp(0.0, 1.0),
+        streak_intensity: ((rain * 0.75 + storm * 0.25) * settings.streak_intensity * occlusion)
+            .clamp(0.0, 1.0),
+        tint,
+    }
+}
+
+fn blend_screen_tint(
+    settings: &WeatherScreenFxSettings,
+    rain: f32,
+    snow: f32,
+    fog: f32,
+    storm: f32,
+) -> Color {
+    let rain_weight = rain.max(0.0);
+    let snow_weight = snow.max(0.0);
+    let fog_weight = fog.max(0.0) * 0.6;
+    let storm_weight = storm.max(0.0) * 0.8;
+    let total_weight = rain_weight + snow_weight + fog_weight + storm_weight;
+    if total_weight <= f32::EPSILON {
+        return Color::WHITE;
+    }
+
+    let rain = LinearRgba::from(settings.rain_tint);
+    let snow = LinearRgba::from(settings.snow_tint);
+    let fog = LinearRgba::from(settings.fog_tint);
+    let storm = LinearRgba::from(settings.storm_tint);
+
+    Color::linear_rgba(
+        (rain.red * rain_weight
+            + snow.red * snow_weight
+            + fog.red * fog_weight
+            + storm.red * storm_weight)
+            / total_weight,
+        (rain.green * rain_weight
+            + snow.green * snow_weight
+            + fog.green * fog_weight
+            + storm.green * storm_weight)
+            / total_weight,
+        (rain.blue * rain_weight
+            + snow.blue * snow_weight
+            + fog.blue * fog_weight
+            + storm.blue * storm_weight)
+            / total_weight,
+        (rain.alpha * rain_weight
+            + snow.alpha * snow_weight
+            + fog.alpha * fog_weight
+            + storm.alpha * storm_weight)
+            / total_weight,
+    )
+}
+
+fn overlay_alpha(visual_state: &WeatherCameraVisualState, state: &WeatherCameraState) -> f32 {
+    (visual_state.screen.overlay_intensity + state.lightning_flash_intensity * 0.35).clamp(0.0, 1.0)
+}
+
+fn overlay_emissive(state: &WeatherCameraState) -> LinearRgba {
+    LinearRgba::WHITE * (state.lightning_flash_intensity * 0.55).clamp(0.0, 1.0)
 }
 
 fn spawn_particles(
@@ -383,6 +607,21 @@ fn particle_transform(
         translation: Vec3::new(x, y, z) + lateral_sway,
         rotation,
         scale,
+    }
+}
+
+fn default_distance_fog(state: &WeatherCameraState) -> DistanceFog {
+    DistanceFog {
+        color: state.fog_color,
+        directional_light_color: state
+            .fog_color
+            .with_alpha((0.12 + state.precipitation_factor * 0.36).clamp(0.0, 1.0)),
+        directional_light_exponent: 18.0,
+        falloff: FogFalloff::from_visibility_colors(
+            state.visibility_distance,
+            state.fog_color.with_alpha(1.0),
+            state.fog_color.with_alpha(1.0),
+        ),
     }
 }
 

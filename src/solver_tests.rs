@@ -1,7 +1,6 @@
 use super::*;
 use crate::{
-    FogProfile, PrecipitationKind, PrecipitationProfile, ScreenFxProfile, StormProfile,
-    WeatherProfile, WindProfile,
+    FogProfile, PrecipitationKind, PrecipitationProfile, StormProfile, WeatherProfile, WindProfile,
 };
 
 #[test]
@@ -45,7 +44,6 @@ fn storm_without_precipitation_normalizes_predictably() {
         precipitation: PrecipitationProfile::none(),
         fog: FogProfile::default(),
         wind: WindProfile::default(),
-        screen_fx: ScreenFxProfile::default(),
         storm: StormProfile {
             intensity: 1.0,
             lightning_frequency_hz: 0.3,
@@ -88,10 +86,9 @@ fn zone_priority_beats_lower_priority_when_overlap_exists() {
 
 #[test]
 fn visibility_and_wetness_increase_with_rain() {
-    let (_, _, clear_visibility, _, _, clear_factors) =
+    let (_, _, clear_visibility, _, clear_factors) =
         resolve_runtime(&WeatherProfile::clear(), 7, 2.0);
-    let (_, _, rain_visibility, _, _, rain_factors) =
-        resolve_runtime(&WeatherProfile::rain(), 7, 2.0);
+    let (_, _, rain_visibility, _, rain_factors) = resolve_runtime(&WeatherProfile::rain(), 7, 2.0);
 
     assert!(rain_visibility.visibility_distance < clear_visibility.visibility_distance);
     assert!(rain_factors.wetness_factor > clear_factors.wetness_factor);
