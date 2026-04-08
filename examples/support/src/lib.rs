@@ -72,7 +72,10 @@ impl WeatherDemoPane {
             instant_apply: false,
             transition_duration_secs: config.default_transition_duration_secs,
             quality_index: quality_to_index(visuals.quality),
-            built_in_overlays: matches!(visuals.screen_fx_mode, WeatherScreenFxMode::BuiltInOverlay),
+            built_in_overlays: matches!(
+                visuals.screen_fx_mode,
+                WeatherScreenFxMode::BuiltInOverlay
+            ),
             rain_factor: 0.0,
             wetness_factor: 0.0,
             visibility_distance: 0.0,

@@ -10,8 +10,8 @@ use saddle_world_weather::{
     WeatherDiagnostics, WeatherOcclusionVolume, WeatherPlugin, WeatherProfile,
     WeatherProfileChanged, WeatherQuality, WeatherRuntime, WeatherScreenFxMode,
     WeatherSurfaceMaterialsPlugin, WeatherSystems, WeatherTransitionFinished,
-    WeatherTransitionStarted, WeatherVisualDiagnostics, WeatherVisualsConfig,
-    WeatherVisualsPlugin, WeatherVolumeShape, WeatherZone,
+    WeatherTransitionStarted, WeatherVisualDiagnostics, WeatherVisualsConfig, WeatherVisualsPlugin,
+    WeatherVolumeShape, WeatherZone,
 };
 
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
@@ -320,7 +320,10 @@ fn exit_after_e2e_completion(
         return;
     }
 
-    if capture.as_ref().is_some_and(|capture| capture.pending_stitch) {
+    if capture
+        .as_ref()
+        .is_some_and(|capture| capture.pending_stitch)
+    {
         *finished_frames = 0;
         return;
     }

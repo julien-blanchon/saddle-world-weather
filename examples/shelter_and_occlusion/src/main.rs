@@ -3,8 +3,7 @@ use saddle_world_weather_example_support as support;
 use bevy::prelude::*;
 use saddle_world_weather::{
     WeatherConfig, WeatherOcclusionVolume, WeatherPlugin, WeatherProfile, WeatherQuality,
-    WeatherSurfaceMaterialsPlugin, WeatherVisualsConfig, WeatherVisualsPlugin,
-    WeatherVolumeShape,
+    WeatherSurfaceMaterialsPlugin, WeatherVisualsConfig, WeatherVisualsPlugin, WeatherVolumeShape,
 };
 
 fn main() {

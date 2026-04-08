@@ -5,7 +5,7 @@ Crate-local lab app for validating the shared `weather` crate in a real Bevy app
 ## Purpose
 
 - verify authored profiles, transitions, camera-local precipitation, fog sync, local zones, shelter suppression, and diagnostics in one scene
-- keep deterministic screenshot checkpoints for smoke, transition gallery, shelter occlusion, storm flashes, and quality scaling
+- keep deterministic screenshot checkpoints for smoke, transition gallery, windy snow, localized zones, camera screen-fx splits, shelter occlusion, storm flashes, and quality scaling
 - expose weather runtime, camera state, message counts, and particle estimates through a readable overlay for BRP and E2E inspection
 
 ## Status
@@ -23,6 +23,9 @@ cargo run -p saddle-world-weather-lab
 ```bash
 cargo run -p saddle-world-weather-lab --features e2e -- weather_smoke
 cargo run -p saddle-world-weather-lab --features e2e -- weather_transition_gallery
+cargo run -p saddle-world-weather-lab --features e2e -- weather_windy_snow
+cargo run -p saddle-world-weather-lab --features e2e -- weather_localized_zones
+cargo run -p saddle-world-weather-lab --features e2e -- weather_camera_screen_fx
 cargo run -p saddle-world-weather-lab --features e2e -- weather_shelter_occlusion
 cargo run -p saddle-world-weather-lab --features e2e -- weather_storm_flash
 cargo run -p saddle-world-weather-lab --features e2e -- weather_quality_compare
