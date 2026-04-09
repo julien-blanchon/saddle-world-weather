@@ -61,6 +61,36 @@ fn windy_snow_profile() -> WeatherProfile {
     profile
 }
 
+fn reset_message_log() -> Action {
+    Action::Custom(Box::new(|world| {
+        *world.resource_mut::<crate::WeatherMessageLog>() = crate::WeatherMessageLog::default();
+    }))
+}
+
+fn queue_immediate_profile(profile: WeatherProfile) -> Action {
+    Action::Custom(Box::new(move |world| {
+        world.resource_mut::<WeatherConfig>().queue_immediate(profile);
+    }))
+}
+
+fn queue_transition_profile(profile: WeatherProfile, seconds: f32) -> Action {
+    Action::Custom(Box::new(move |world| {
+        world.resource_mut::<WeatherConfig>()
+            .queue_transition(profile, seconds);
+    }))
+}
+
+fn wait_for_profile(label: &'static str, expected: &'static str) -> Action {
+    Action::WaitUntil {
+        label: label.into(),
+        condition: Box::new(move |world| {
+            let runtime = support::runtime(world);
+            runtime.active_profile.label.as_deref() == Some(expected) && !runtime.transition.active
+        }),
+        max_frames: 180,
+    }
+}
+
 pub fn list_scenarios() -> Vec<&'static str> {
     vec![
         "weather_smoke",
@@ -143,26 +173,11 @@ fn weather_smoke() -> Scenario {
 fn weather_transition_gallery() -> Scenario {
     Scenario::builder("weather_transition_gallery")
         .description("Transition through foggy, rain, storm, and snow profiles with assertions and screenshots at each stable resolved state.")
-        .then(Action::Custom(Box::new(|world| {
-            *world.resource_mut::<crate::WeatherMessageLog>() = crate::WeatherMessageLog::default();
-            world
-                .resource_mut::<WeatherConfig>()
-                .queue_immediate(WeatherProfile::clear());
-        })))
+        .then(reset_message_log())
         .then(Action::WaitFrames(5))
-        .then(Action::Custom(Box::new(|world| {
-            world
-                .resource_mut::<WeatherConfig>()
-                .queue_transition(WeatherProfile::foggy(), 1.0);
-        })))
-        .then(Action::WaitUntil {
-            label: "foggy".into(),
-            condition: Box::new(|world| {
-                let runtime = support::runtime(world);
-                runtime.active_profile.label.as_deref() == Some("Foggy") && !runtime.transition.active
-            }),
-            max_frames: 180,
-        })
+        .then(queue_immediate_profile(WeatherProfile::clear()))
+        .then(queue_transition_profile(WeatherProfile::foggy(), 1.0))
+        .then(wait_for_profile("foggy", "Foggy"))
         .then(log_runtime_snapshot("foggy"))
         .then(Action::Custom(Box::new(|world| {
             let runtime = support::runtime(world);
@@ -170,19 +185,8 @@ fn weather_transition_gallery() -> Scenario {
             assert!(runtime.factors.fog_factor > 0.35);
         })))
         .then(Action::Screenshot("foggy".into()))
-        .then(Action::Custom(Box::new(|world| {
-            world
-                .resource_mut::<WeatherConfig>()
-                .queue_transition(WeatherProfile::rain(), 1.0);
-        })))
-        .then(Action::WaitUntil {
-            label: "rain".into(),
-            condition: Box::new(|world| {
-                let runtime = support::runtime(world);
-                runtime.active_profile.label.as_deref() == Some("Rain") && !runtime.transition.active
-            }),
-            max_frames: 180,
-        })
+        .then(queue_transition_profile(WeatherProfile::rain(), 1.0))
+        .then(wait_for_profile("rain", "Rain"))
         .then(log_runtime_snapshot("rain"))
         .then(Action::Custom(Box::new(|world| {
             let runtime = support::runtime(world);
@@ -191,19 +195,8 @@ fn weather_transition_gallery() -> Scenario {
             assert!(visual_diagnostics.precipitation_particles_estimate > 0);
         })))
         .then(Action::Screenshot("rain".into()))
-        .then(Action::Custom(Box::new(|world| {
-            world
-                .resource_mut::<WeatherConfig>()
-                .queue_transition(WeatherProfile::storm(), 1.0);
-        })))
-        .then(Action::WaitUntil {
-            label: "storm".into(),
-            condition: Box::new(|world| {
-                let runtime = support::runtime(world);
-                runtime.active_profile.label.as_deref() == Some("Storm") && !runtime.transition.active
-            }),
-            max_frames: 180,
-        })
+        .then(queue_transition_profile(WeatherProfile::storm(), 1.0))
+        .then(wait_for_profile("storm", "Storm"))
         .then(log_runtime_snapshot("storm"))
         .then(Action::Custom(Box::new(|world| {
             let runtime = support::runtime(world);
@@ -212,19 +205,8 @@ fn weather_transition_gallery() -> Scenario {
             assert!(runtime.wind.vector.length() > 1.0);
         })))
         .then(Action::Screenshot("storm".into()))
-        .then(Action::Custom(Box::new(|world| {
-            world
-                .resource_mut::<WeatherConfig>()
-                .queue_transition(WeatherProfile::snow(), 1.0);
-        })))
-        .then(Action::WaitUntil {
-            label: "snow".into(),
-            condition: Box::new(|world| {
-                let runtime = support::runtime(world);
-                runtime.active_profile.label.as_deref() == Some("Snow") && !runtime.transition.active
-            }),
-            max_frames: 180,
-        })
+        .then(queue_transition_profile(WeatherProfile::snow(), 1.0))
+        .then(wait_for_profile("snow", "Snow"))
         .then(log_runtime_snapshot("snow"))
         .then(Action::Custom(Box::new(|world| {
             let runtime = support::runtime(world);
@@ -254,22 +236,12 @@ fn weather_transition_gallery() -> Scenario {
 fn weather_windy_snow() -> Scenario {
     Scenario::builder("weather_windy_snow")
         .description("Apply a gust-heavy snow profile, verify the wind and snowfall factors increase, and capture the windy_snow showcase state.")
+        .then(queue_immediate_profile(windy_snow_profile()))
         .then(Action::Custom(Box::new(|world| {
-            world
-                .resource_mut::<WeatherConfig>()
-                .queue_immediate(windy_snow_profile());
             world.resource_mut::<WeatherVisualsConfig>().screen_fx.snow_intensity = 0.32;
             world.resource_mut::<WeatherVisualsConfig>().screen_fx.frost_intensity = 0.55;
         })))
-        .then(Action::WaitUntil {
-            label: "windy snow resolved".into(),
-            condition: Box::new(|world| {
-                let runtime = support::runtime(world);
-                runtime.active_profile.label.as_deref() == Some("Windy Snow")
-                    && !runtime.transition.active
-            }),
-            max_frames: 180,
-        })
+        .then(wait_for_profile("windy snow resolved", "Windy Snow"))
         .then(log_runtime_snapshot("windy_snow"))
         .then(Action::Custom(Box::new(|world| {
             let runtime = support::runtime(world);
@@ -345,10 +317,8 @@ fn weather_localized_zones() -> Scenario {
 fn weather_camera_screen_fx() -> Scenario {
     Scenario::builder("weather_camera_screen_fx")
         .description("Split the showcase into gameplay and cinematic viewports, disable screen-space effects on the left camera, and verify only the right camera receives the full storm overlay.")
+        .then(queue_immediate_profile(WeatherProfile::storm()))
         .then(Action::Custom(Box::new(|world| {
-            world
-                .resource_mut::<WeatherConfig>()
-                .queue_immediate(WeatherProfile::storm());
             let Ok((mut camera, mut weather_camera, mut transform)) = world
                 .query_filtered::<
                     (&mut Camera, &mut saddle_world_weather::WeatherCamera, &mut Transform),
@@ -416,10 +386,8 @@ fn weather_camera_screen_fx() -> Scenario {
 fn weather_shelter_occlusion() -> Scenario {
     Scenario::builder("weather_shelter_occlusion")
         .description("Move the camera from open rain into the shelter and verify precipitation plus screen-space cues are strongly suppressed.")
+        .then(queue_immediate_profile(WeatherProfile::storm()))
         .then(Action::Custom(Box::new(|world| {
-            world
-                .resource_mut::<WeatherConfig>()
-                .queue_immediate(WeatherProfile::storm());
             support::set_primary_camera(world, Vec3::new(0.0, 2.8, -16.0), Vec3::new(0.0, 2.0, 0.0));
         })))
         .then(Action::WaitFrames(15))
@@ -453,12 +421,8 @@ fn weather_shelter_occlusion() -> Scenario {
 fn weather_storm_flash() -> Scenario {
     Scenario::builder("weather_storm_flash")
         .description("Run a deterministic storm until a lightning flash is active, then assert both the flash state and emitted message count before capturing the frame.")
-        .then(Action::Custom(Box::new(|world| {
-            *world.resource_mut::<crate::WeatherMessageLog>() = crate::WeatherMessageLog::default();
-            world
-                .resource_mut::<WeatherConfig>()
-                .queue_immediate(WeatherProfile::storm());
-        })))
+        .then(reset_message_log())
+        .then(queue_immediate_profile(WeatherProfile::storm()))
         .then(Action::WaitUntil {
             label: "storm flash".into(),
             condition: Box::new(|world| {
@@ -496,10 +460,8 @@ fn weather_storm_flash() -> Scenario {
 fn weather_quality_compare() -> Scenario {
     Scenario::builder("weather_quality_compare")
         .description("Pause on a storm profile, capture low quality particle density, then switch to high quality and assert the particle budget increases.")
+        .then(queue_immediate_profile(WeatherProfile::storm()))
         .then(Action::Custom(Box::new(|world| {
-            world
-                .resource_mut::<WeatherConfig>()
-                .queue_immediate(WeatherProfile::storm());
             world.resource_mut::<WeatherVisualsConfig>().quality = WeatherQuality::Low;
             *world.resource_mut::<crate::QualitySnapshot>() = crate::QualitySnapshot::default();
         })))
